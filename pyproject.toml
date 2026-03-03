@@ -1,0 +1,19 @@
+[project]
+name = "ora-rd-orchestrator"
+version = "0.1.0"
+description = "Offline project-aware R&D research orchestrator with multi-agent scoring."
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+ora-rd-orchestrator = "ora_rd_orchestrator.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
