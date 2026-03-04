@@ -31,6 +31,129 @@
 - `research_reports/`
   - 과거 보고서 템플릿/소스(샘플 V9) 보관
 
+## FastAPI + Postgres + RabbitMQ + Docker Compose
+
+FastAPI는 요청을 수신하고 Job을 enqueue하며, RabbitMQ 기반 멀티 에이전트 워커가 실제 `make` 타깃(`run-cycle`, `run-loop`, `e2e-service` 등)을 실행합니다.
+
+- `api`: 제어면(Control Plane), 요청/조회
+- `worker-ceo` / `worker-pm` / `worker-researcher` / `worker-engineer` / `worker-qa`
+- `db`: 실행 이력/의사결정/이벤트 저장
+- `rabbitmq`: main/retry/dlq 큐 라우팅
+
+### 빠른 시작
+
+```bash
+cd /Users/mike/workspace/side_project/Ora/ora-automation
+
+# API + DB + RabbitMQ + 멀티 에이전트 워커 기동
+make api-up
+
+# 상태 확인
+make api-ps
+make api-health
+
+# 로그 확인
+make api-logs
+```
+
+### API 호출 예시
+
+```bash
+# 1) run-cycle 실행 요청
+curl -sS -X POST http://localhost:8000/api/v1/orchestrations \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "user_prompt": "V10 R&D 리서치 1회 실행",
+    "target": "run-cycle",
+    "env": {
+      "RUN_CYCLES": "1",
+      "VERIFY_ROUNDS": "3",
+      "TOP": "6"
+    }
+  }'
+
+# 2) e2e-service 실행 요청 (B2C)
+curl -sS -X POST http://localhost:8000/api/v1/orchestrations \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "user_prompt": "B2C E2E 실행",
+    "target": "e2e-service",
+    "env": {
+      "SERVICE": "b2c",
+      "E2E_TOOL": "playwright",
+      "E2E_SERVICE_MODE": "run"
+    }
+  }'
+
+# 3) 최근 실행 목록 조회
+curl -sS "http://localhost:8000/api/v1/orchestrations?limit=10"
+
+# 4) 단건 조회 (run_id 교체)
+curl -sS "http://localhost:8000/api/v1/orchestrations/<run_id>"
+```
+
+`stdout/stderr`는 `research_reports/api_runs/<run_id>/`에 저장됩니다.
+
+### 운영 액션 API
+
+```bash
+# pause
+curl -sS -X POST http://localhost:8000/api/v1/orchestrations/<run_id>/pause
+
+# resume (queued로 전환 후 재-enqueue)
+curl -sS -X POST http://localhost:8000/api/v1/orchestrations/<run_id>/resume
+
+# cancel
+curl -sS -X POST http://localhost:8000/api/v1/orchestrations/<run_id>/cancel
+
+# stage/event 로그 조회
+curl -sS "http://localhost:8000/api/v1/orchestrations/<run_id>/events?limit=200"
+
+# 토론/합의 의사결정 객체 조회
+curl -sS "http://localhost:8000/api/v1/orchestrations/<run_id>/decision"
+```
+
+### LLM 플래너 API (자연어 -> 실행 계획 -> 실행)
+
+`api` 컨테이너 환경변수에 플래너 커맨드를 넣으면 활성화됩니다.
+
+```bash
+export ORA_AUTOMATION_LLM_PLANNER_CMD='python /workspace/Ora/ora-automation/scripts/llm_planner_adapter.py'
+docker compose up -d --build
+curl -sS http://localhost:8000/health
+```
+
+- `llm_planner_configured: true`면 사용 가능
+
+```bash
+# 1) 계획만 생성
+curl -sS -X POST http://localhost:8000/api/v1/plan \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "prompt":"B2C 서비스 E2E를 playwright로 한 번 실행하고 실패하면 재시도 전략을 포함해 계획해줘",
+    "context":{"service":"b2c"}
+  }'
+
+# 2) 계획 생성 + 즉시 실행 enqueue
+curl -sS -X POST http://localhost:8000/api/v1/orchestrations/from-plan \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "prompt":"OraServer와 OraAiServer를 포함한 R&D 리서치 run-cycle 1회 실행",
+    "context":{"services":["telecom","ai"]},
+    "idempotency_key":"plan-run-001"
+  }'
+```
+
+### 중지/초기화
+
+```bash
+# 컨테이너만 중지
+make api-down
+
+# DB 볼륨까지 초기화
+make api-reset
+```
+
 ## 실전 웹 검증기 (research_sources.json 자동 갱신기)
 
 `research_sources.json`은 주제별 출처 URL 목록입니다.
@@ -65,6 +188,15 @@ cd /Users/mike/workspace/side_project/Ora/ora-automation
 # 1) 최초 셋업
 make setup
 
+# 1-b) Gemini(Vertex + Service Account) 기본값 확인
+# Makefile 기본값:
+#   GOOGLE_CLOUD_PROJECT_ID=ora-project-474413
+#   GOOGLE_CLOUD_LOCATION=us-central1
+#   GEMINI_MODEL=gemini-2.5-flash-lite
+#   GOOGLE_APPLICATION_CREDENTIALS=/Users/mike/workspace/side_project/Ora/ora-automation/google-service-account.json
+# 필요 시만 경로 override:
+# export GOOGLE_APPLICATION_CREDENTIALS=/your/path/google-service-account.json
+
 # 2) 1회 분석 실행
 make run
 
@@ -95,6 +227,12 @@ make run-cycle ORA_RD_RESEARCH_ARXIV_SEARCH=1 ORA_RD_RESEARCH_CROSSREF_SEARCH=0 
 # 5) 반복 횟수 증가해 더 끈질기게 수행
 make run-loop RUN_CYCLES=3 VERIFY_ROUNDS=4
 make run-loop RUN_CYCLES=3 VERIFY_ROUNDS=4 DEBATE_ROUNDS=4
+
+# Docker 실행
+make docker-build
+make docker-run TOP=1 OUTPUT_DIR=/tmp/ora-rd-docker
+make docker-run-cycle RUN_CYCLES=2 VERIFY_ROUNDS=3
+make docker-run-loop RUN_CYCLES=3 DEBATE_ROUNDS=3
 
 # 6) 존재 소스 파일만 검증
 make verify-sources VERIFY_SOURCE_FILES="/Users/mike/workspace/side_project/Ora/ora-automation/research_reports/V9_대화흐름혁신_업무자동화_신뢰성강화/research_sources.json"
@@ -224,12 +362,27 @@ make e2e-service SERVICE=telecom
 # 5개 기본 슬롯을 한 번에
 make e2e-service-all
 
+# QA 프로그램(서비스별 실행 + 결과 리포트)
+make qa-program
+
+# QA 프로그램 반복 실행
+make qa-program-loop QA_LOOP_CYCLES=3
+
+# 최신 QA 리포트 경로 확인
+make qa-report-latest
+
 # AI 테스트 인수 조정
 make e2e-service SERVICE=ai E2E_PYTEST_ARGS="tests/test_scenario_edge.py -q"
 
 # B2C를 Cypress로 강제 실행
 make e2e-service SERVICE=b2c E2E_FORCE_CYPRESS=1 E2E_SERVICE_MODE=open
 ```
+
+`make qa-program`은 `research_reports/qa_runs/<run_name>/`에 아래 파일을 생성합니다.
+
+- `qa_summary.md`: 노션/공유용 요약 보고서
+- `qa_summary.json`: 파이프라인 연계용 구조화 결과
+- `<service>_attemptN.log`: 서비스별 실행 로그
 
 ### 지원 서비스 목록
 

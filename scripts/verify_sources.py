@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import ssl
 import time
@@ -18,6 +19,21 @@ ARXIV_API_URL = "https://export.arxiv.org/api/query?id_list={arxiv_id}"
 CROSSREF_WORK_API_URL = "https://api.crossref.org/works/{doi}"
 OPENALEX_DOI_API_URL = "https://api.openalex.org/works/https://doi.org/{doi}"
 TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+
+
+def _build_ssl_context() -> ssl.SSLContext:
+    env_ca = os.getenv("ORA_RD_CA_BUNDLE", "").strip()
+    if env_ca:
+        try:
+            return ssl.create_default_context(cafile=env_ca)
+        except Exception:
+            pass
+
+    try:
+        import certifi  # type: ignore
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
 
 
 def _now_iso() -> str:
@@ -91,7 +107,7 @@ def _request_url(url: str, timeout: float, max_bytes: int = 65536) -> tuple[str,
         },
     )
     start = time.perf_counter()
-    ctx = ssl.create_default_context()
+    ctx = _build_ssl_context()
     with request.urlopen(req, timeout=timeout, context=ctx) as resp:
         status = int(resp.getcode())
         final_url = resp.geturl()
@@ -110,7 +126,7 @@ def _request_json(url: str, timeout: float, max_bytes: int = 65536) -> tuple[str
         },
     )
     start = time.perf_counter()
-    ctx = ssl.create_default_context()
+    ctx = _build_ssl_context()
     with request.urlopen(req, timeout=timeout, context=ctx) as resp:
         status = int(resp.getcode())
         final_url = str(resp.geturl())

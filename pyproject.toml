@@ -4,9 +4,24 @@ version = "0.1.0"
 description = "Offline project-aware R&D research orchestrator with multi-agent scoring."
 readme = "README.md"
 requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn[standard]>=0.30.0,<1.0.0",
+    "sqlalchemy>=2.0.30,<3.0.0",
+    "psycopg[binary]>=3.1.19,<4.0.0",
+    "pydantic>=2.7.0,<3.0.0",
+    "pika>=1.3.2,<2.0.0",
+    "pyyaml>=6.0.1,<7.0.0",
+    "certifi>=2024.8.30",
+    "google-auth>=2.35.0",
+    "requests>=2.32.0",
+]
 
 [project.scripts]
 ora-rd-orchestrator = "ora_rd_orchestrator.cli:main"
+ora-automation-api = "ora_automation_api.main:main"
+ora-automation-worker = "ora_automation_api.worker:main"
+ora-automation-chatbot = "ora_rd_orchestrator.chatbot:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

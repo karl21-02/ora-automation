@@ -1,0 +1,2 @@
+scripts/run_collaboration_cycle.sh: line 246: .venv/bin/python: No such file or directory
+make: *** [Makefile:260: run-cycle] Error 127

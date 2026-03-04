@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import math
 import os
+import uuid
 import copy
 import shlex
 import subprocess
@@ -305,6 +306,69 @@ RESEARCH_QUERY_TAGS = [
     "speech recognition",
     "TTS",
 ]
+ORCHESTRATION_PROFILE_DEFAULT = "standard"
+ORCHESTRATION_PROFILE_STRICT = "strict"
+ORCHESTRATION_STAGE_ANALYSIS = "analysis"
+ORCHESTRATION_STAGE_DELIBERATION = "deliberation"
+ORCHESTRATION_STAGE_EXECUTION = "execution"
+ORCHESTRATION_STAGES_DEFAULT = [
+    ORCHESTRATION_STAGE_ANALYSIS,
+    ORCHESTRATION_STAGE_DELIBERATION,
+    ORCHESTRATION_STAGE_EXECUTION,
+]
+LLM_DELIBERATION_CMD_ENV = "ORA_RD_LLM_DELIBERATION_CMD"
+LLM_DELIBERATION_TIMEOUT_SECONDS = 8.0
+LLM_DELIBERATION_FALLBACK_MIN_ROUND = 1
+PIPELINE_FAIL_LABEL_SKIP = "SKIP"
+PIPELINE_FAIL_LABEL_RETRY = "RETRY"
+PIPELINE_FAIL_LABEL_STOP = "STOP"
+ORCHESTRATION_STAGES_SET = {ORCHESTRATION_STAGE_ANALYSIS, ORCHESTRATION_STAGE_DELIBERATION, ORCHESTRATION_STAGE_EXECUTION}
+ORCHESTRATION_PROFILE_LABELS = {ORCHESTRATION_PROFILE_DEFAULT, ORCHESTRATION_PROFILE_STRICT}
+DECISION_DUE_DEFAULT_DAYS = 14
+SERVICE_SCOPE_DEFAULT: tuple[str, ...] = ("b2b", "b2c", "ai", "telecom", "b2b-android")
+ORCHESTRATION_PROFILE_ROUND_LIMITS = {
+    ORCHESTRATION_PROFILE_DEFAULT: 3,
+    ORCHESTRATION_PROFILE_STRICT: 4,
+}
+PIPELINE_RETRY_LIMIT_DEFAULT = 2
+PIPELINE_RETRY_DELAY_SECONDS = 1.2
+LLM_DELIBERATION_FAIL_LABEL_LOW_RISK = PIPELINE_FAIL_LABEL_SKIP
+LLM_DELIBERATION_FAIL_LABEL_MEDIUM_RISK = PIPELINE_FAIL_LABEL_RETRY
+LLM_DELIBERATION_FAIL_LABEL_HIGH_RISK = PIPELINE_FAIL_LABEL_STOP
+AGENT_FINAL_WEIGHTS = {
+    "CEO": 0.25,
+    "Planner": 0.17,
+    "Developer": 0.16,
+    "Researcher": 0.15,
+    "PM": 0.12,
+    "Ops": 0.10,
+    "QA": 0.05,
+}
+
+
+def _agent_ids() -> list[str]:
+    return list(AGENT_WEIGHTS.keys())
+
+
+def _agent_score_key(agent: str) -> str:
+    return agent.lower().replace(" ", "_")
+
+SERVICE_ALIAS_MAP: dict[str, list[str]] = {
+    "b2b": ["orab2bserver", "orab2bserver", "ora-b2b", "b2bserver"],
+    "b2b-android": ["orab2bandroid", "ora-b2b-android", "mobile", "android"],
+    "b2c": [
+        "orawebappfrontend",
+        "orawebappserver",
+        "oramainfrontend",
+        "orab2c",
+        "ora-admin-frontend",
+        "oraadminfrontend",
+    ],
+    "ai": ["oraaiserver", "oraiserver", "ai", "llm_server", "tts_server"],
+    "telecom": ["oraserver", "oraserver", "telecom", "callserver"],
+    "docs": ["oradocs", "ora-docs", "docs", "readme"],
+}
+SERVICE_SCOPE_LABELS = {service: service for service in SERVICE_ALIAS_MAP}
 
 
 SupportRule = Callable[["TopicState", dict[str, float]], bool]
@@ -359,6 +423,98 @@ def _challenges_developer_by_code_gap(state: "TopicState", features: dict[str, f
     return state.code_hits < 1.5
 
 
+# --- Researcher support/challenge (reused from Planner) ---
+
+# --- PM support/challenge ---
+def _supports_pm_by_market_signal(state: "TopicState", features: dict[str, float]) -> bool:
+    return state.business_hits >= 2 or state.project_count >= 2
+
+
+def _challenges_pm_by_feasibility(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "feasibility") < 4.0
+
+
+# --- Ops support/challenge ---
+def _supports_ops_by_stability(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "feasibility") >= 7.0 and _feature_value(features, "risk_penalty") < 4.0
+
+
+def _challenges_ops_by_risk(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "risk_penalty") >= 6.0
+
+
+# --- SecuritySpecialist support/challenge ---
+def _supports_security_by_low_risk(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "risk_penalty") < 3.0 and state.code_hits >= 3
+
+
+def _challenges_security_by_high_risk(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "risk_penalty") >= 5.5
+
+
+# --- Linguist support/challenge ---
+def _supports_linguist_by_novelty(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "novelty") >= 5.5 and state.doc_hits >= 2
+
+
+def _challenges_linguist_by_weak_docs(state: "TopicState", features: dict[str, float]) -> bool:
+    return state.doc_hits < 1 and _feature_value(features, "novelty") < 4.0
+
+
+# --- MarketAnalyst support/challenge ---
+def _supports_market_by_business(state: "TopicState", features: dict[str, float]) -> bool:
+    return state.business_hits >= 3 and _feature_value(features, "impact") >= 6.0
+
+
+def _challenges_market_by_low_impact(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "impact") < 4.5 and state.business_hits < 1
+
+
+# --- FinanceAnalyst support/challenge ---
+def _supports_finance_by_roi(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "feasibility") >= 6.5 and state.business_hits >= 2
+
+
+def _challenges_finance_by_cost(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "feasibility") < 4.0 and _feature_value(features, "risk_penalty") >= 5.0
+
+
+# --- UXVoiceDesigner support/challenge ---
+def _supports_ux_by_impact(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "impact") >= 6.0 and state.keyword_hits >= 4
+
+
+def _challenges_ux_by_low_impact(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "impact") < 4.0
+
+
+# --- DataScientist support/challenge ---
+def _supports_data_by_research(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "research_signal") >= 5.5 and state.history_hits >= 2
+
+
+def _challenges_data_by_weak_signal(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "research_signal") < 3.5 and state.history_hits < 1
+
+
+# --- DevOpsSRE support/challenge ---
+def _supports_devops_by_infra(state: "TopicState", features: dict[str, float]) -> bool:
+    return state.code_hits >= 4 and _feature_value(features, "feasibility") >= 6.0
+
+
+def _challenges_devops_by_instability(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "risk_penalty") >= 5.5 and state.code_hits < 2
+
+
+# --- QALead support/challenge ---
+def _supports_qalead_by_quality(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "feasibility") >= 6.0 and _feature_value(features, "risk_penalty") < 4.0
+
+
+def _challenges_qalead_by_risk(state: "TopicState", features: dict[str, float]) -> bool:
+    return _feature_value(features, "risk_penalty") >= 5.0 or _feature_value(features, "feasibility") < 3.5
+
+
 AGENT_DEFINITIONS: dict[str, dict[str, object]] = {
     "CEO": {
         "objective": "사업성 우선. 수주/ROI/과제 파이프라인 적중률",
@@ -377,6 +533,8 @@ AGENT_DEFINITIONS: dict[str, dict[str, object]] = {
             "다중 프로젝트 재사용성",
             "리스크 대비 투자 효율성",
         ],
+        "tier": 4,
+        "domain": None,
     },
     "Planner": {
         "objective": "체감 품질/확장성/장기 과제화 적합성",
@@ -395,6 +553,8 @@ AGENT_DEFINITIONS: dict[str, dict[str, object]] = {
             "기술 차별성 축적성",
             "연구 연계성/학술 신뢰도",
         ],
+        "tier": 2,
+        "domain": None,
     },
     "Developer": {
         "objective": "실무 PoC 가능성/재사용성/리스크 억제",
@@ -413,8 +573,253 @@ AGENT_DEFINITIONS: dict[str, dict[str, object]] = {
             "운영 연동 비용",
             "실행 가능한 PoC 크기",
         ],
+        "tier": 1,
+        "domain": "Ops",
+    },
+    "Researcher": {
+        "objective": "논문 근거성/실험 엄밀성/기술 진척 속도 동시 평가",
+        "weights": {
+            "impact": 0.25,
+            "novelty": 0.35,
+            "feasibility": 0.20,
+            "research_signal": 0.18,
+            "risk": -0.10,
+        },
+        "supports": [_supports_planner_by_research_signal, _supports_planner_by_novelty],
+        "challenges": [_challenges_planner_by_feasibility, _challenges_planner_by_code_deficit],
+        "trust": {"CEO": 0.76, "Planner": 0.82, "Developer": 0.74, "Researcher": 1.0, "PM": 0.72, "QA": 0.70, "Ops": 0.71},
+        "decision_focus": [
+            "논문/자료의 최신성 및 재현성",
+            "실험 설계 타당성",
+            "근거 기반 가설-검증 정합",
+        ],
+        "tier": 1,
+        "domain": "Planner",
+    },
+    "PM": {
+        "objective": "릴리즈/로드맵 정렬, 우선순위 충돌 완화 및 성과 가시성 확보",
+        "weights": {
+            "impact": 0.40,
+            "feasibility": 0.40,
+            "novelty": 0.10,
+            "research_signal": 0.05,
+            "risk": -0.05,
+        },
+        "supports": [_supports_pm_by_market_signal],
+        "challenges": [_challenges_pm_by_feasibility, _challenges_ceo_by_risk],
+        "trust": {"CEO": 0.92, "Planner": 0.86, "Developer": 0.85, "Researcher": 0.82, "PM": 1.0, "QA": 0.82, "Ops": 0.79},
+        "decision_focus": [
+            "단기/중기 KPI 정렬",
+            "요구사항 전달 안정성",
+            "의사결정 속도와 팀 부하 관리",
+        ],
+        "tier": 2,
+        "domain": None,
+    },
+    "Ops": {
+        "objective": "운영 안정성, 장애 복구력, 롤백 조건과 운영 리스크 통제",
+        "weights": {
+            "impact": 0.28,
+            "feasibility": 0.32,
+            "novelty": 0.05,
+            "research_signal": 0.05,
+            "risk": 0.30,
+        },
+        "supports": [_supports_ops_by_stability, _supports_ceo_by_market_signal],
+        "challenges": [_challenges_ops_by_risk, _challenges_planner_by_feasibility],
+        "trust": {"CEO": 0.89, "Planner": 0.82, "Developer": 0.91, "Researcher": 0.78, "PM": 0.90, "QA": 0.88, "Ops": 1.0},
+        "decision_focus": [
+            "배포 롤백가시성",
+            "서비스 분리/영향도 통제",
+            "실패 모드 및 재발 대응성",
+        ],
+        "tier": 2,
+        "domain": None,
+    },
+    "QA": {
+        "objective": "품질 보증, 회귀 탐지, 테스트성/재현성 보장",
+        "weights": {
+            "feasibility": 0.24,
+            "impact": 0.20,
+            "novelty": 0.10,
+            "research_signal": 0.12,
+            "risk": 0.34,
+        },
+        "supports": [_supports_developer_by_feasibility],
+        "challenges": [_challenges_developer_by_feasibility, _challenges_planner_by_feasibility],
+        "trust": {"CEO": 0.75, "Planner": 0.80, "Developer": 0.85, "Researcher": 0.83, "PM": 0.84, "Ops": 0.91, "QA": 1.0},
+        "decision_focus": [
+            "수정 가능성 높은 실패 모드 탐지",
+            "회귀 리스크 관리",
+            "테스트 커버리지/자동화 적재적소 배치",
+        ],
+        "tier": 1,
+        "domain": "QALead",
+    },
+    # --- Hierarchical-mode agents ---
+    "SecuritySpecialist": {
+        "objective": "보안 취약점 탐지, 규정 준수, 위협 모델링 평가",
+        "weights": {
+            "impact": 0.10,
+            "novelty": 0.05,
+            "feasibility": 0.15,
+            "research_signal": 0.20,
+            "risk": 0.50,
+        },
+        "supports": [_supports_security_by_low_risk],
+        "challenges": [_challenges_security_by_high_risk],
+        "trust": {"QALead": 0.90, "Ops": 0.85, "Developer": 0.80, "SecuritySpecialist": 1.0},
+        "decision_focus": [
+            "OWASP/보안 취약점 식별",
+            "데이터 보호 규정 준수",
+            "위협 모델링 완성도",
+        ],
+        "tier": 1,
+        "domain": "QALead",
+    },
+    "Linguist": {
+        "objective": "프롬프트/NLP 품질, 다국어 정합성, 음성 UX 언어 평가",
+        "weights": {
+            "impact": 0.20,
+            "novelty": 0.30,
+            "feasibility": 0.15,
+            "research_signal": 0.25,
+            "risk": 0.10,
+        },
+        "supports": [_supports_linguist_by_novelty],
+        "challenges": [_challenges_linguist_by_weak_docs],
+        "trust": {"QALead": 0.88, "PM": 0.82, "Researcher": 0.85, "Linguist": 1.0},
+        "decision_focus": [
+            "프롬프트/응답 자연스러움",
+            "다국어 지원 품질",
+            "음성 인터페이스 언어 적합성",
+        ],
+        "tier": 1,
+        "domain": "QALead",
+    },
+    "MarketAnalyst": {
+        "objective": "시장 동향, 경쟁사 분석, TAM/SAM/SOM 기반 기회 평가",
+        "weights": {
+            "impact": 0.45,
+            "novelty": 0.15,
+            "feasibility": 0.20,
+            "research_signal": 0.15,
+            "risk": 0.05,
+        },
+        "supports": [_supports_market_by_business],
+        "challenges": [_challenges_market_by_low_impact],
+        "trust": {"PM": 0.90, "CEO": 0.88, "Planner": 0.80, "MarketAnalyst": 1.0},
+        "decision_focus": [
+            "시장 규모 및 성장 잠재력",
+            "경쟁사 대비 차별화",
+            "고객 세그먼트 적합성",
+        ],
+        "tier": 1,
+        "domain": "PM",
+    },
+    "FinanceAnalyst": {
+        "objective": "ROI/비용 분석, 투자 회수 기간, 재무 리스크 평가",
+        "weights": {
+            "impact": 0.25,
+            "novelty": 0.05,
+            "feasibility": 0.35,
+            "research_signal": 0.05,
+            "risk": 0.30,
+        },
+        "supports": [_supports_finance_by_roi],
+        "challenges": [_challenges_finance_by_cost],
+        "trust": {"Ops": 0.88, "CEO": 0.90, "PM": 0.85, "FinanceAnalyst": 1.0},
+        "decision_focus": [
+            "ROI 및 투자 회수 기간",
+            "인력/인프라 비용 대비 효과",
+            "재무 리스크 및 기회비용",
+        ],
+        "tier": 1,
+        "domain": "Ops",
+    },
+    "UXVoiceDesigner": {
+        "objective": "음성 UX 설계, 대화 흐름, 사용자 체감 품질 평가",
+        "weights": {
+            "impact": 0.40,
+            "novelty": 0.20,
+            "feasibility": 0.20,
+            "research_signal": 0.15,
+            "risk": 0.05,
+        },
+        "supports": [_supports_ux_by_impact],
+        "challenges": [_challenges_ux_by_low_impact],
+        "trust": {"PM": 0.88, "Planner": 0.82, "Researcher": 0.78, "UXVoiceDesigner": 1.0},
+        "decision_focus": [
+            "음성 대화 흐름 자연스러움",
+            "사용자 만족도 개선 가능성",
+            "접근성/포용성 설계",
+        ],
+        "tier": 1,
+        "domain": "PM",
+    },
+    "DataScientist": {
+        "objective": "데이터 파이프라인, 모델 성능, 실험 설계 및 통계 검증 평가",
+        "weights": {
+            "impact": 0.20,
+            "novelty": 0.25,
+            "feasibility": 0.15,
+            "research_signal": 0.30,
+            "risk": 0.10,
+        },
+        "supports": [_supports_data_by_research],
+        "challenges": [_challenges_data_by_weak_signal],
+        "trust": {"Planner": 0.85, "Researcher": 0.90, "Developer": 0.78, "DataScientist": 1.0},
+        "decision_focus": [
+            "데이터 품질 및 충분성",
+            "모델 아키텍처 적합성",
+            "실험 설계 통계적 타당성",
+        ],
+        "tier": 1,
+        "domain": "Planner",
+    },
+    "DevOpsSRE": {
+        "objective": "인프라 안정성, 배포 파이프라인, SLO/SLI 기반 신뢰성 평가",
+        "weights": {
+            "impact": 0.15,
+            "novelty": 0.05,
+            "feasibility": 0.30,
+            "research_signal": 0.15,
+            "risk": 0.35,
+        },
+        "supports": [_supports_devops_by_infra],
+        "challenges": [_challenges_devops_by_instability],
+        "trust": {"Ops": 0.92, "Developer": 0.88, "QALead": 0.82, "DevOpsSRE": 1.0},
+        "decision_focus": [
+            "배포 자동화/롤백 안정성",
+            "인프라 확장성 및 비용",
+            "SLO 달성 가능성",
+        ],
+        "tier": 1,
+        "domain": "Ops",
+    },
+    "QALead": {
+        "objective": "품질 게이트 관리, 하위 에이전트 품질 종합, 출시 판정 기준 관리",
+        "weights": {
+            "impact": 0.15,
+            "novelty": 0.05,
+            "feasibility": 0.20,
+            "research_signal": 0.20,
+            "risk": 0.40,
+        },
+        "supports": [_supports_qalead_by_quality],
+        "challenges": [_challenges_qalead_by_risk],
+        "trust": {"CEO": 0.80, "Planner": 0.82, "Developer": 0.85, "Ops": 0.90, "QALead": 1.0},
+        "decision_focus": [
+            "품질 게이트 통과 여부",
+            "하위 에이전트 점수 종합 판정",
+            "출시/배포 품질 기준 관리",
+        ],
+        "tier": 2,
+        "domain": None,
     },
 }
+
+FLAT_MODE_AGENTS = {"CEO", "Planner", "Developer", "Researcher", "PM", "Ops", "QA"}
 
 AGENT_WEIGHTS = {name: data["weights"] for name, data in AGENT_DEFINITIONS.items()}
 AGENT_DEBATE_RULES = {
@@ -426,6 +831,86 @@ AGENT_DEBATE_RULES = {
 }
 AGENT_TRUST = {
     name: data["trust"] for name, data in AGENT_DEFINITIONS.items()
+}
+
+# ---------------------------------------------------------------------------
+# Hierarchical (4-Tier) pipeline data structures & constants
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TierResult:
+    tier: int
+    tier_label: str  # "practitioners"|"team_leads"|"directors"|"executives"
+    agent_scores: dict[str, dict[str, float]]  # {topic_id: {agent_key: score}}
+    aggregated_scores: dict[str, float] | None = None
+    ranking: list[dict] = field(default_factory=list)
+    debate_log: list[dict] | None = None
+    flags: dict[str, list[str]] = field(default_factory=dict)  # QA gate warnings
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class HierarchicalPipelineState:
+    mode: str = "hierarchical"  # "hierarchical"|"flat"
+    tier_results: dict[int, TierResult] = field(default_factory=dict)
+    final_ranking: list[dict] = field(default_factory=list)
+    execution_log: list[dict] = field(default_factory=list)
+
+
+TIER_2_DOMAIN_MAP: dict[str, dict[str, object]] = {
+    "Planner": {
+        "tier1_agents": ["Researcher", "DataScientist"],
+        "intra_weights": {"Researcher": 0.55, "DataScientist": 0.45},
+        "aggregation": "weighted_mean",
+    },
+    "PM": {
+        "tier1_agents": ["UXVoiceDesigner", "MarketAnalyst"],
+        "intra_weights": {"UXVoiceDesigner": 0.50, "MarketAnalyst": 0.50},
+        "aggregation": "weighted_mean",
+    },
+    "Ops": {
+        "tier1_agents": ["Developer", "DevOpsSRE", "FinanceAnalyst"],
+        "intra_weights": {"Developer": 0.40, "DevOpsSRE": 0.35, "FinanceAnalyst": 0.25},
+        "aggregation": "weighted_mean",
+    },
+    "QALead": {
+        "tier1_agents": ["SecuritySpecialist", "Linguist", "QA"],
+        "intra_weights": {"SecuritySpecialist": 0.45, "Linguist": 0.35, "QA": 0.20},
+        "aggregation": "min_gated_mean",
+        "gate_threshold": 3.5,
+    },
+}
+
+HIERARCHICAL_FINAL_WEIGHTS: dict[str, object] = {
+    "tier4_weight": 0.30,
+    "tier3_weight": 0.35,
+    "tier2_weight": 0.25,
+    "tier1_weight": 0.10,
+    "tier2_lead_weights": {
+        "Planner": 0.30,
+        "PM": 0.25,
+        "Ops": 0.25,
+        "QALead": 0.20,
+    },
+}
+
+HIERARCHICAL_TRUST: dict[str, dict[str, float]] = {
+    "CEO": {"Planner": 0.85, "PM": 0.88, "Ops": 0.82, "QALead": 0.80},
+    "Planner": {"Researcher": 0.88, "DataScientist": 0.82},
+    "PM": {"UXVoiceDesigner": 0.85, "MarketAnalyst": 0.82},
+    "Ops": {"Developer": 0.85, "DevOpsSRE": 0.88, "FinanceAnalyst": 0.78},
+    "QALead": {"SecuritySpecialist": 0.90, "Linguist": 0.82, "QA": 0.85},
+}
+
+SUBORDINATE_BLEND_DEFAULT = 0.60
+QA_GATE_THRESHOLD_DEFAULT = 3.5
+QA_GATE_PENALTY = 0.10
+
+TIER_1_AGENTS = {
+    name for name, defn in AGENT_DEFINITIONS.items() if defn.get("tier") == 1
+}
+TIER_2_AGENTS = {
+    name for name, defn in AGENT_DEFINITIONS.items() if defn.get("tier") == 2
 }
 
 DEBATE_ROUNDS_DEFAULT = 2
@@ -511,6 +996,38 @@ class DebateEvent:
     target_agents: list[str]
     confidence: float
     evidence_weight: float
+
+
+@dataclass
+class OrchestrationDecision:
+    decision_id: str
+    owner: str
+    rationale: str
+    risk: str
+    next_action: str
+    due: str
+    topic_id: str
+    topic_name: str
+    service: list[str]
+    score_delta: float
+    confidence: float
+    fail_label: str
+
+    def to_dict(self) -> dict:
+        return {
+            "decision_id": self.decision_id,
+            "owner": self.owner,
+            "rationale": self.rationale,
+            "risk": self.risk,
+            "next_action": self.next_action,
+            "due": self.due,
+            "topic_id": self.topic_id,
+            "topic_name": self.topic_name,
+            "service": self.service,
+            "score_delta": self.score_delta,
+            "confidence": self.confidence,
+            "fail_label": self.fail_label,
+        }
 
 
 @dataclass
@@ -624,7 +1141,33 @@ def _iter_files(
             if file_path.stat().st_size > 1_200_000:
                 continue
             candidates.append(file_path)
-    return sorted(candidates)[:max_files]
+    if not candidates:
+        return []
+
+    project_groups: dict[str, list[Path]] = {}
+    for file_path in candidates:
+        project = _infer_project_name(workspace, file_path)
+        project_groups.setdefault(project, []).append(file_path)
+
+    for key in project_groups:
+        project_groups[key] = sorted(project_groups[key])
+
+    project_keys = sorted(project_groups.keys())
+    balanced: list[Path] = []
+    depth = 0
+    while len(balanced) < max_files:
+        progressed = False
+        for key in project_keys:
+            files = project_groups[key]
+            if depth < len(files):
+                balanced.append(files[depth])
+                progressed = True
+                if len(balanced) >= max_files:
+                    break
+        if not progressed:
+            break
+        depth += 1
+    return balanced
 
 
 def _infer_project_name(workspace: Path, file_path: Path) -> str:
@@ -656,6 +1199,114 @@ def _safe_snippet(line: str) -> str:
         return text
     return text[:167] + "..."
 
+
+def _normalize_text_token(value: str) -> str:
+    return value.strip().lower().replace("-", "")
+
+
+def _parse_service_scopes(value: str | Iterable[str] | None) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        raw_tokens = [token.strip() for token in value.split(",") if token.strip()]
+    else:
+        raw_tokens = [str(token).strip() for token in value if str(token).strip()]
+    scope: set[str] = set()
+    for item in raw_tokens:
+        key = _normalize_text_token(item)
+        if key:
+            scope.add(key)
+    return scope
+
+
+def _normalize_services(value: Iterable[str] | None, fallback: set[str] | None = None) -> list[str]:
+    if not value:
+        return sorted(set(fallback or set()))
+    normalized: set[str] = set()
+    for item in value:
+        key = _normalize_text_token(str(item))
+        if key:
+            normalized.add(key)
+    return sorted(normalized)
+
+
+def _service_alias_to_scope(service: str) -> str:
+    key = _normalize_text_token(service)
+    if not key:
+        return ""
+    for scope, aliases in SERVICE_ALIAS_MAP.items():
+        scope_key = _normalize_text_token(scope)
+        if key == scope_key:
+            return scope
+        alias_keys = {scope_key}
+        alias_keys.update({_normalize_text_token(token) for token in aliases})
+        if key in alias_keys:
+            return scope
+    return key
+
+
+def _build_service_scope(service_scope: set[str] | list[str] | None) -> list[str]:
+    normalized = _parse_service_scopes(service_scope)
+    if not normalized:
+        return sorted(set(SERVICE_SCOPE_DEFAULT))
+    expanded: set[str] = set()
+    for scope in normalized:
+        resolved = _service_alias_to_scope(scope)
+        if resolved:
+            expanded.add(resolved)
+    expanded.add("global")
+    return sorted(expanded)
+
+
+def _to_decision_due(days: int = DECISION_DUE_DEFAULT_DAYS) -> str:
+    return (dt.datetime.now() + dt.timedelta(days=max(1, days))).strftime("%Y-%m-%d")
+
+
+def _parse_orchestration_stages(value: str | Iterable[str] | None) -> list[str]:
+    if value is None:
+        return list(ORCHESTRATION_STAGES_DEFAULT)
+    if isinstance(value, str):
+        tokens = [token.strip() for token in value.split(",") if token.strip()]
+    else:
+        tokens = [str(token).strip() for token in value if str(token).strip()]
+
+    stages: list[str] = []
+    for token in tokens:
+        normalized = token.lower().replace("_", "-")
+        if normalized in ORCHESTRATION_STAGES_SET:
+            stages.append(normalized)
+    if not stages:
+        return list(ORCHESTRATION_STAGES_DEFAULT)
+    # de-dup preserve order
+    seen = set[str]()
+    ordered: list[str] = []
+    for stage in stages:
+        if stage in seen:
+            continue
+        ordered.append(stage)
+        seen.add(stage)
+    return ordered
+
+
+def _parse_service_scope_tokens(value: str | Iterable[str] | None) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        items = [item.strip() for item in value.split(",") if item.strip()]
+    else:
+        items = [str(item).strip() for item in value if str(item).strip()]
+    return {_normalize_text_token(item) for item in items}
+
+
+def _normalize_stages(value: Iterable[str] | None, fallback: Iterable[str]) -> list[str]:
+    fallback_set = [str(item).strip() for item in fallback if str(item).strip()]
+    if value is None:
+        return fallback_set
+    parsed = _parse_orchestration_stages(value)
+    if not parsed:
+        return fallback_set
+    return parsed
+
 def _update_topic_hits(
     topic_state: TopicState,
     match: str,
@@ -679,7 +1330,21 @@ def analyze_workspace(
     ignore_dirs: set[str],
     max_files: int,
     history_files: list[Path],
+    service_scope: set[str] | None = None,
 ) -> dict[str, TopicState]:
+    canonical_scopes: set[str] = set()
+    for item in (service_scope or set()):
+        resolved = _service_alias_to_scope(str(item))
+        if resolved:
+            canonical_scopes.add(resolved)
+
+    include_docs = "docs" in canonical_scopes or "global" in canonical_scopes or not canonical_scopes
+    allowed_projects: set[str] = set()
+    if canonical_scopes:
+        for scope_name in canonical_scopes:
+            aliases = [scope_name]
+            aliases.extend(SERVICE_ALIAS_MAP.get(scope_name, []))
+            allowed_projects.update({_normalize_text_token(alias) for alias in aliases if alias})
     states: dict[str, TopicState] = {
         topic_id: TopicState(topic_id=topic_id, topic_name=details["name"])
         for topic_id, details in TOPICS.items()
@@ -689,12 +1354,18 @@ def analyze_workspace(
     file_paths = _iter_files(workspace, ext_set, set(ignore_dirs), max_files)
 
     for file_path in file_paths:
+        project_name = _infer_project_name(workspace, file_path)
+        project_name_norm = _normalize_text_token(project_name)
+        if canonical_scopes and project_name_norm != "root":
+            if project_name_norm not in allowed_projects:
+                continue
+        if project_name_norm == "root" and not include_docs:
+            continue
         lines = _read_lines(file_path)
         if not lines:
             continue
 
         is_code_file = file_path.suffix.lower() in {".java", ".kt", ".py", ".ts", ".tsx"}
-        project_name = _infer_project_name(workspace, file_path)
 
         for line_no, line in lines:
             lowered = line.lower()
@@ -769,32 +1440,18 @@ def score_by_agents(states: dict[str, TopicState]) -> dict[str, dict[str, float]
     result: dict[str, dict[str, float]] = {}
     for topic_id, state in states.items():
         feat = state.compute_features()
-        ceo = (
-            AGENT_WEIGHTS["CEO"]["impact"] * feat["impact"]
-            + AGENT_WEIGHTS["CEO"]["novelty"] * feat["novelty"]
-            + AGENT_WEIGHTS["CEO"]["feasibility"] * feat["feasibility"]
-            + AGENT_WEIGHTS["CEO"]["research_signal"] * feat["research_signal"]
-            + AGENT_WEIGHTS["CEO"]["risk"] * feat["risk_penalty"]
-        )
-        planner = (
-            AGENT_WEIGHTS["Planner"]["impact"] * feat["impact"]
-            + AGENT_WEIGHTS["Planner"]["novelty"] * feat["novelty"]
-            + AGENT_WEIGHTS["Planner"]["feasibility"] * feat["feasibility"]
-            + AGENT_WEIGHTS["Planner"]["research_signal"] * feat["research_signal"]
-            + AGENT_WEIGHTS["Planner"]["risk"] * feat["risk_penalty"]
-        )
-        developer = (
-            AGENT_WEIGHTS["Developer"]["impact"] * feat["impact"]
-            + AGENT_WEIGHTS["Developer"]["novelty"] * feat["novelty"]
-            + AGENT_WEIGHTS["Developer"]["feasibility"] * feat["feasibility"]
-            + AGENT_WEIGHTS["Developer"]["research_signal"] * feat["research_signal"]
-            + AGENT_WEIGHTS["Developer"]["risk"] * feat["risk_penalty"]
-        )
-        result[topic_id] = {
-            "CEO": round(ceo, 2),
-            "Planner": round(planner, 2),
-            "Developer": round(developer, 2),
-        }
+        agent_scores: dict[str, float] = {}
+        for agent_id in _agent_ids():
+            weights = AGENT_WEIGHTS[agent_id]
+            score = (
+                weights["impact"] * feat["impact"]
+                + weights["novelty"] * feat["novelty"]
+                + weights["feasibility"] * feat["feasibility"]
+                + weights["research_signal"] * feat["research_signal"]
+                + weights["risk"] * feat["risk_penalty"]
+            )
+            agent_scores[_agent_score_key(agent_id)] = round(score, 2)
+        result[topic_id] = agent_scores
     return result
 
 
@@ -804,13 +1461,11 @@ def _build_global_scores(
     topic_votes = _rank_from_scores(scores)
     totals: list[tuple[str, float]] = []
     for topic_id in scores:
-        total = round(
-            0.45 * scores[topic_id]["CEO"]
-            + 0.25 * scores[topic_id]["Planner"]
-            + 0.30 * scores[topic_id]["Developer"]
-            + 0.02 * topic_votes[topic_id],
-            2,
-        )
+        weighted_sum = 0.0
+        for agent_id, agent_weight in AGENT_FINAL_WEIGHTS.items():
+            weighted_sum += agent_weight * scores[topic_id].get(_agent_score_key(agent_id), 0.0)
+        weighted_sum += 0.02 * topic_votes[topic_id]
+        total = round(weighted_sum, 2)
         totals.append((topic_id, total))
     return sorted(totals, key=lambda item: item[1], reverse=True)
 
@@ -948,7 +1603,12 @@ def _build_round_messages(
             continue
         per_agent_count = 0
 
-        ranked_by_speaker = sorted(scores.items(), key=lambda item: item[1][speaker], reverse=True)
+        speaker_key = _agent_score_key(speaker)
+        ranked_by_speaker = sorted(
+            scores.items(),
+            key=lambda item: item[1].get(speaker_key, 0.0),
+            reverse=True,
+        )
         preferred_topics = [topic for topic, _ in ranked_by_speaker[:DEBATE_TOPIC_WINDOW]]
         union_topics: list[str] = []
         for topic_id in preferred_topics:
@@ -1109,7 +1769,7 @@ def simulate_roundtable_deliberation(
 
         messages = _build_round_messages(round_no, states, working_scores, global_ranking)
         adjustment_map: dict[str, dict[str, float]] = {
-            topic_id: {agent: 0.0 for agent in AGENT_WEIGHTS}
+            topic_id: {_agent_score_key(agent): 0.0 for agent in AGENT_WEIGHTS}
             for topic_id in states
         }
 
@@ -1117,16 +1777,19 @@ def simulate_roundtable_deliberation(
             if msg.topic_id not in working_scores:
                 continue
             for target in [msg.speaker] + msg.target_agents:
+                target_key = _agent_score_key(target)
+                if target_key not in working_scores[msg.topic_id]:
+                    continue
                 trust = AGENT_TRUST.get(msg.speaker, {}).get(target, 0.72)
                 weight = DEBATE_INFLUENCE_SELF if target == msg.speaker else DEBATE_INFLUENCE_OTHER
                 weight *= trust
                 applied_delta = msg.delta * weight * max(0.45, msg.confidence)
-                working_scores[msg.topic_id][target] = _clamp_score(
-                    working_scores[msg.topic_id][target] + applied_delta,
+                working_scores[msg.topic_id][target_key] = _clamp_score(
+                    working_scores[msg.topic_id][target_key] + applied_delta,
                     lo=0.0,
                     hi=10.0,
                 )
-                adjustment_map[msg.topic_id][target] += applied_delta
+                adjustment_map[msg.topic_id][target_key] += applied_delta
 
         next_ranking = _build_global_scores(working_scores)
         post_round_ranking = [topic for topic, _ in next_ranking]
@@ -1200,9 +1863,12 @@ def simulate_roundtable_deliberation(
 
 def _rank_from_scores(scores: dict[str, dict[str, float]]) -> dict[str, int]:
     by_agent = {
-        "CEO": sorted(scores.items(), key=lambda i: i[1]["CEO"], reverse=True),
-        "Planner": sorted(scores.items(), key=lambda i: i[1]["Planner"], reverse=True),
-        "Developer": sorted(scores.items(), key=lambda i: i[1]["Developer"], reverse=True),
+        agent: sorted(
+            scores.items(),
+            key=lambda i: i[1].get(_agent_score_key(agent), 0.0),
+            reverse=True,
+        )
+        for agent in AGENT_WEIGHTS
     }
     rank_map = {topic_id: 0 for topic_id in scores}
     for agent_scores in by_agent.values():
@@ -1217,27 +1883,22 @@ def _build_final_score(states: dict[str, TopicState], scores: dict[str, dict[str
 
     for topic_id, state in states.items():
         feature = state.compute_features()
-        total = round(
-            0.45 * scores[topic_id]["CEO"]
-            + 0.25 * scores[topic_id]["Planner"]
-            + 0.30 * scores[topic_id]["Developer"]
-            + 0.02 * topic_votes[topic_id],
-            2,
-        )
-        output.append(
-            {
-                "topic_id": topic_id,
-                "topic_name": state.topic_name,
-                "total_score": total,
-                "ceo": scores[topic_id]["CEO"],
-                "planner": scores[topic_id]["Planner"],
-                "developer": scores[topic_id]["Developer"],
-                "features": feature,
-                "project_count": state.project_count,
-                "evidence_count": len(state.evidence),
-                "evidence": [e.snippet for e in state.evidence[:4]],
-            }
-        )
+        total = 0.0
+        for agent_id, agent_weight in AGENT_FINAL_WEIGHTS.items():
+            total += agent_weight * scores[topic_id].get(_agent_score_key(agent_id), 0.0)
+        total = round(total + 0.02 * topic_votes[topic_id], 2)
+        row: dict[str, object] = {
+            "topic_id": topic_id,
+            "topic_name": state.topic_name,
+            "total_score": total,
+            "features": feature,
+            "project_count": state.project_count,
+            "evidence_count": len(state.evidence),
+            "evidence": [e.snippet for e in state.evidence[:4]],
+        }
+        for agent_id in _agent_ids():
+            row[_agent_score_key(agent_id)] = scores[topic_id].get(_agent_score_key(agent_id), 0.0)
+        output.append(row)
     output.sort(key=lambda x: x["total_score"], reverse=True)
     return output
 
@@ -1450,6 +2111,7 @@ def _build_agent_decisions(top_topics: list[dict], states: dict[str, TopicState]
         feature = item["features"]
         records: list[dict] = []
         for agent in AGENT_WEIGHTS:
+            score_key = _agent_score_key(agent)
             action, reason = _agent_decision(agent, state, feature)
             records.append(
                 {
@@ -1458,7 +2120,7 @@ def _build_agent_decisions(top_topics: list[dict], states: dict[str, TopicState]
                     "decision": action,
                     "reason": reason,
                     "focus": _agent_focus_points(agent),
-                    "score": item[agent.lower()] if agent.lower() in item else 0.0,
+                    "score": item[score_key] if score_key in item else 0.0,
                 }
             )
         records.sort(key=lambda x: x["agent"])
@@ -1532,10 +2194,16 @@ def _build_strategy_cards(
     return cards
 
 
-def _build_agent_rankings(scores: dict[str, dict[str, float]], top_k: int) -> dict[str, list[str]]:
+def _build_agent_rankings(
+    scores: dict[str, dict[str, float]],
+    top_k: int,
+    agent_filter: set[str] | None = None,
+) -> dict[str, list[str]]:
+    agents = agent_filter if agent_filter else set(AGENT_WEIGHTS.keys())
     rankings: dict[str, list[str]] = {}
-    for agent in AGENT_WEIGHTS:
-        ranked_agent = sorted(scores.items(), key=lambda item: item[1][agent], reverse=True)
+    for agent in agents:
+        key = _agent_score_key(agent)
+        ranked_agent = sorted(scores.items(), key=lambda item: item[1].get(key, 0.0), reverse=True)
         rankings[agent] = [topic_id for topic_id, _ in ranked_agent[:top_k]]
     return rankings
 
@@ -1551,6 +2219,36 @@ def _build_consensus(
             weight = vote_weight_by_rank.get(rank, 0)
             vote_scores[topic_id] = vote_scores.get(topic_id, 0) + weight
     return [topic_id for topic_id, _ in sorted(vote_scores.items(), key=lambda item: item[1], reverse=True)][:top_k]
+
+
+def _init_neutral_agent_scores(states: dict[str, TopicState], value: float = 5.0) -> dict[str, dict[str, float]]:
+    initial = _clamp_score(value, 0.0, 10.0)
+    return {
+        topic_id: {_agent_score_key(agent): initial for agent in AGENT_WEIGHTS}
+        for topic_id in states
+    }
+
+
+def _pipeline_decisions_to_topic_records(
+    decisions: list[OrchestrationDecision] | None,
+) -> dict[str, list[dict]]:
+    records: dict[str, list[dict]] = {}
+    for item in decisions or []:
+        record = {
+            "agent": item.owner,
+            "objective": AGENT_DEFINITIONS.get(item.owner, {}).get("objective", ""),
+            "decision": "review",
+            "reason": item.rationale,
+            "focus": AGENT_DEFINITIONS.get(item.owner, {}).get("decision_focus", []),
+            "score": item.confidence,
+            "risk": item.risk,
+            "next_action": item.next_action,
+            "fail_label": item.fail_label,
+            "due": item.due,
+            "service": item.service,
+        }
+        records.setdefault(item.topic_id, []).append(record)
+    return records
 
 
 def _topic_item_index(ranked: list[dict]) -> dict[str, dict]:
@@ -1575,11 +2273,21 @@ def _build_llm_consensus_payload(
     discussion: list[dict] | None,
     top_k: int,
 ) -> dict:
-    base_consensus = _build_consensus(agent_rankings, top_k=min(top_k, len(ranked)))
     return {
-        "version": "hybrid-consensus-v1",
+        "version": "llm-consensus-v2",
         "top_k": top_k,
-        "agent_consensus": base_consensus,
+        "output_contract": {
+            "final_consensus": "ordered topic_id list length<=top_k",
+            "rationale": "string",
+            "concerns": [{"topic_id": "id", "reason": "string"}],
+        },
+        "agent_rules": {
+            agent: {
+                "objective": AGENT_DEFINITIONS.get(agent, {}).get("objective", ""),
+                "decision_focus": AGENT_DEFINITIONS.get(agent, {}).get("decision_focus", []),
+            }
+            for agent in AGENT_WEIGHTS
+        },
         "discussion": discussion or [],
         "topics": [
             {
@@ -1682,6 +2390,264 @@ def _run_llm_consensus(
     return "ok", result, raw_output
 
 
+def _to_risk_label(value: float) -> str:
+    if value >= 8.0:
+        return "high"
+    if value >= 6.0:
+        return "medium"
+    return "low"
+
+
+def _normalize_fail_label(value: object) -> str:
+    label = str(value).strip().upper().replace(" ", "_")
+    if label in {PIPELINE_FAIL_LABEL_SKIP, PIPELINE_FAIL_LABEL_RETRY, PIPELINE_FAIL_LABEL_STOP}:
+        return label
+    return ""
+
+
+def _coerce_fail_label(risk_label: str, risk_score: float, confidence: float) -> str:
+    if risk_label == "high" or risk_score >= 8.0:
+        if confidence >= 0.84:
+            return LLM_DELIBERATION_FAIL_LABEL_HIGH_RISK
+        return LLM_DELIBERATION_FAIL_LABEL_MEDIUM_RISK
+    if risk_label == "medium" or risk_score >= 6.0:
+        if confidence >= 0.75:
+            return LLM_DELIBERATION_FAIL_LABEL_MEDIUM_RISK
+        return LLM_DELIBERATION_FAIL_LABEL_LOW_RISK
+    return LLM_DELIBERATION_FAIL_LABEL_LOW_RISK
+
+
+def _resolve_agent_name(raw: object) -> str:
+    value = str(raw).strip().lower().replace(" ", "_")
+    for agent in AGENT_WEIGHTS:
+        if value in {agent.lower(), _agent_score_key(agent)}:
+            return agent
+    return ""
+
+def _coerce_confidence(value: object, default: float = 0.5) -> float:
+    try:
+        return _clamp_score(float(value), 0.0, 1.0)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_llm_decision_record(
+    item: dict,
+    topic_catalog: dict[str, TopicState],
+    service_scope: list[str],
+) -> OrchestrationDecision:
+    topic_id = str(item.get("topic_id", "")).strip()
+    if topic_id not in topic_catalog:
+        topic_id = next(iter(topic_catalog), "")
+    state = topic_catalog.get(topic_id)
+    topic_name = state.topic_name if state else topic_id
+    score_delta = float(item.get("score_delta", item.get("delta", 0.0) or 0.0))
+    risk_score = float(item.get("risk_score", item.get("risk", 0.0) or 0.0))
+    risk_label = item.get("risk", "")
+    if isinstance(risk_label, (int, float)):
+        risk_label = _to_risk_label(float(risk_label))
+    elif isinstance(risk_label, str):
+        risk_label = risk_label.strip().lower() or _to_risk_label(risk_score)
+    else:
+        risk_label = _to_risk_label(risk_score)
+    owner = str(item.get("owner", "")).strip() or "Researcher"
+    if owner not in AGENT_DEFINITIONS:
+        owner = "Researcher"
+    target_services_raw = item.get("service", [])
+    if isinstance(target_services_raw, str):
+        target_services = _normalize_services(target_services_raw.split(","))
+    elif isinstance(target_services_raw, (list, tuple, set)):
+        target_services = _normalize_services(target_services_raw)
+    else:
+        target_services = list(service_scope) if service_scope else []
+    if not target_services:
+        target_services = list(service_scope) if service_scope else ["global"]
+    rationale = str(item.get("rationale", "")).strip()
+    if not rationale:
+        rationale = "LLM 근거 메시지가 누락되어 보수적으로 처리"
+    next_action = str(item.get("next_action", "")).strip() or "추가 근거 정리 후 1차 PoC 범위 확정"
+    due = str(item.get("due", "")).strip()
+    if not due:
+        due = _to_decision_due()
+    fail_label = _normalize_fail_label(item.get("fail_label", ""))
+    if not fail_label:
+        fail_label = _coerce_fail_label(
+            risk_label=risk_label,
+            risk_score=risk_score,
+            confidence=_coerce_confidence(item.get("confidence", 0.5), 0.5),
+        )
+    return OrchestrationDecision(
+        decision_id=str(item.get("decision_id", f"decision-{uuid.uuid4()}")),
+        owner=owner,
+        rationale=rationale,
+        risk=risk_label,
+        next_action=next_action,
+        due=due,
+        topic_id=topic_id,
+        topic_name=topic_name,
+        service=target_services,
+        score_delta=_clamp_score(score_delta, -5.0, 5.0),
+        confidence=_coerce_confidence(item.get("confidence", 0.5), 0.5),
+        fail_label=fail_label,
+    )
+
+
+def _llm_round_payload(
+    round_no: int,
+    stages: list[str],
+    service_scope: list[str],
+    ranked: list[dict],
+    states: dict[str, TopicState],
+    scores: dict[str, dict[str, float]],
+    previous_decisions: list[dict] | None,
+    discussion: list[dict] | None,
+) -> dict:
+    return {
+        "version": "llm-deliberation-v1",
+        "output_contract": {
+            "score_adjustments": "topic_id -> {agent_name_or_key: -3.0~3.0}",
+            "decisions": [
+                {
+                    "decision_id": "string",
+                    "owner": "CEO|Planner|Developer|Researcher|PM|Ops|QA",
+                    "topic_id": "topic id",
+                    "rationale": "why",
+                    "risk": "low|medium|high",
+                    "next_action": "action",
+                    "due": "YYYY-MM-DD",
+                    "service": ["b2b", "b2c"],
+                    "score_delta": "float",
+                    "confidence": "0~1",
+                    "fail_label": "SKIP|RETRY|STOP",
+                }
+            ],
+            "action_log": "optional list",
+        },
+        "round": round_no,
+        "stages": stages,
+        "service_scope": service_scope,
+        "agent_rules": {
+            agent: {
+                "objective": AGENT_DEFINITIONS.get(agent, {}).get("objective", ""),
+                "decision_focus": AGENT_DEFINITIONS.get(agent, {}).get("decision_focus", []),
+                "weights": AGENT_DEFINITIONS.get(agent, {}).get("weights", {}),
+            }
+            for agent in AGENT_WEIGHTS
+        },
+        "topics": [
+            {
+                "topic_id": item["topic_id"],
+                "topic_name": item["topic_name"],
+                "scores": item,
+                "feature": item["features"],
+                "evidence_count": len(states[item["topic_id"]].evidence),
+                "project_hits": states[item["topic_id"]].project_hits,
+            }
+            for item in ranked[: min(8, len(ranked))]
+            if item["topic_id"] in states
+        ],
+        "score_matrix": scores,
+        "topic_states": {
+            topic_id: {
+                "features": state.compute_features(),
+                "keyword_hits": state.keyword_hits,
+                "business_hits": state.business_hits,
+                "novelty_hits": state.novelty_hits,
+                "code_hits": state.code_hits,
+                "doc_hits": state.doc_hits,
+                "history_hits": state.history_hits,
+                "projects": sorted(state.project_hits.keys()),
+            }
+            for topic_id, state in states.items()
+        },
+        "previous_decisions": previous_decisions or [],
+        "previous_discussion": discussion or [],
+    }
+
+
+def _llm_round_response_to_updates(
+    payload: dict,
+    command: str | None,
+    timeout: float,
+    ranked: list[dict],
+    states: dict[str, TopicState],
+    service_scope: list[str],
+) -> tuple[str, dict, list[OrchestrationDecision], dict[str, dict[str, float]], list[dict], list[dict]]:
+    status, response, raw_output = _run_llm_consensus(payload, command=command, timeout=timeout)
+    fallback_updates: dict[str, dict[str, float]] = {}
+    action_log: list[dict] = []
+    parsed_decisions: list[OrchestrationDecision] = []
+    score_adjustments = {topic_id: {agent: 0.0 for agent in AGENT_WEIGHTS} for topic_id in states}
+
+    if status != "ok":
+        return status, {"status": status, "reason": response.get("reason", "llm 실행 실패")}, parsed_decisions, score_adjustments, action_log, [{"round": payload.get("round"), "stage": "deliberation", "status": status, "raw_output": raw_output[:800]}]
+
+    updates = response.get("score_adjustments")
+    if isinstance(updates, dict):
+        for topic_id, per_agent in updates.items():
+            if topic_id not in score_adjustments:
+                continue
+            if not isinstance(per_agent, dict):
+                continue
+            for agent, delta in per_agent.items():
+                resolved_agent = _resolve_agent_name(agent)
+                if not resolved_agent:
+                    continue
+                try:
+                    parsed_delta = _clamp_score(float(delta), -3.0, 3.0)
+                except (TypeError, ValueError):
+                    continue
+                score_adjustments[topic_id][resolved_agent] = parsed_delta
+
+    decision_items = response.get("decisions")
+    if isinstance(decision_items, list):
+        for item in decision_items:
+            if not isinstance(item, dict):
+                continue
+            parsed = _parse_llm_decision_record(item, states, service_scope)
+            if parsed.topic_id not in [r.topic_id for r in parsed_decisions]:
+                parsed_decisions.append(parsed)
+
+    if isinstance(response.get("action_log"), list):
+        action_log = [entry for entry in response.get("action_log") if isinstance(entry, dict)]
+
+    return status, response, parsed_decisions, score_adjustments, action_log, response.get("round_summary", {"round": payload.get("round"), "agent": "llm"})
+
+
+def _llm_deliberation_round(
+    round_no: int,
+    stages: list[str],
+    service_scope: list[str],
+    states: dict[str, TopicState],
+    working_scores: dict[str, dict[str, float]],
+    ranked: list[dict],
+    previous_decisions: list[dict],
+    previous_discussion: list[dict],
+    command: str | None,
+    timeout: float,
+) -> tuple[dict[str, dict[str, float]], list[OrchestrationDecision], list[dict], list[dict], dict]:
+    topic_ranked = _build_final_score(states, working_scores)  # ranking snapshot
+    payload = _llm_round_payload(
+        round_no=round_no,
+        stages=stages,
+        service_scope=service_scope,
+        ranked=topic_ranked,
+        states=states,
+        scores=working_scores,
+        previous_decisions=previous_decisions,
+        discussion=previous_discussion,
+    )
+    status, raw_payload, decisions, score_adjustments, llm_actions, round_summary = _llm_round_response_to_updates(
+        payload=payload,
+        command=command,
+        timeout=timeout,
+        ranked=topic_ranked,
+        states=states,
+        service_scope=service_scope,
+    )
+
+    applied_updates: dict[str, dict[str, float]] = copy.deepcopy(score_adjustments)
+    return applied_updates, decisions, [round_summary] if round_summary else [], llm_actions, {"status": status, "result": raw_payload}
 def _consensus_hard_gate(topic_item: dict, state: TopicState) -> tuple[bool, str]:
     feature = topic_item["features"]
     evidence_count = len(state.evidence)
@@ -1707,135 +2673,63 @@ def _apply_hybrid_consensus(
     timeout: float = LLM_CONSENSUS_TIMEOUT_SECONDS,
 ) -> dict:
     target_size = min(top_k, len(ranked))
-    ranked_map = _topic_item_index(ranked)
     payload = _build_llm_consensus_payload(ranked, states, agent_rankings, discussion, target_size)
-    base_consensus = _build_consensus(agent_rankings, top_k=target_size)
     status, llm_result, raw_output = _run_llm_consensus(payload, command=command, timeout=timeout)
+    if status != "ok":
+        return {
+            "method": "llm-only",
+            "status": "failed",
+            "reason": llm_result.get("reason", "llm consensus failed"),
+            "final_consensus_ids": [],
+            "final_rationale": "",
+            "llm": {"status": status, **llm_result},
+            "llm_raw_output": raw_output[:1200] if raw_output else "",
+            "concerns": [],
+            "vetoed": [],
+            "gating": [],
+            "payload": payload,
+            "target_size": target_size,
+            "requested_top_k": top_k,
+        }
 
-    final_candidate = list(base_consensus)
-    llm_rationale = "rule_only"
-    llm_overall = {"status": status}
-    llm_concerns: list[dict[str, str]] = []
-    vetoed: list[str] = []
-    gated: list[dict[str, str]] = []
-
-    if status == "ok":
-        candidate = llm_result.get("final_consensus", llm_result.get("consensus", []))
-        if isinstance(candidate, list):
-            final_candidate = [topic_id for topic_id in candidate if isinstance(topic_id, str)]
-            if final_candidate:
-                final_candidate = final_candidate[:target_size]
-                llm_rationale = str(llm_result.get("rationale", "")).strip() or llm_rationale
-                llm_overall = llm_result
-            else:
-                final_candidate = list(base_consensus)
-
-        concerns_raw = llm_result.get("concerns", [])
-        if isinstance(concerns_raw, list):
-            for item in concerns_raw:
-                if isinstance(item, str):
-                    llm_concerns.append({"topic_id": item, "reason": "LLM 내부 우려 지점으로 표기됨"})
-                elif isinstance(item, dict):
-                    topic_id = item.get("topic_id")
-                    if isinstance(topic_id, str):
-                        reason = str(item.get("reason", "")).strip() or "LLM 내부 우려 지점으로 표기됨"
-                        llm_concerns.append({"topic_id": topic_id, "reason": reason})
-    else:
-        llm_overall = {"status": status, "reason": llm_result.get("reason", "llm 미사용/실패")}
-
-    ordered_candidate_ids: list[str] = []
-    seen = set[str]()
-    for topic_id in final_candidate:
-        if topic_id in seen:
-            continue
-        ordered_candidate_ids.append(topic_id)
-        seen.add(topic_id)
-    for topic_id in base_consensus:
-        if len(ordered_candidate_ids) >= target_size:
-            break
-        if topic_id in seen:
-            continue
-        ordered_candidate_ids.append(topic_id)
-        seen.add(topic_id)
-
-    gated_consensus: list[str] = []
-    for topic_id in ordered_candidate_ids[:target_size]:
-        item = ranked_map.get(topic_id)
-        state = states.get(topic_id)
-        if not item or not state:
-            continue
-        passed, reason = _consensus_hard_gate(item, state)
-        if not passed:
-            vetoed.append(topic_id)
-            gated.append({"topic_id": topic_id, "reason": reason})
-            continue
-        gated_consensus.append(topic_id)
-
-    if len(gated_consensus) < target_size:
-        # fallback: ensure baseline order and hard-gate constraints with fill-up
-        for topic_id in base_consensus:
-            if topic_id in gated_consensus:
+    candidate = llm_result.get("final_consensus", llm_result.get("consensus", []))
+    final_consensus: list[str] = []
+    if isinstance(candidate, list):
+        for topic_id in candidate:
+            if not isinstance(topic_id, str):
                 continue
-            if topic_id in vetoed:
+            if topic_id in final_consensus:
                 continue
-            item = ranked_map.get(topic_id)
-            state = states.get(topic_id)
-            if not item or not state:
-                continue
-            passed, reason = _consensus_hard_gate(item, state)
-            if passed:
-                gated_consensus.append(topic_id)
-            else:
-                vetoed.append(topic_id)
-                gated.append({"topic_id": topic_id, "reason": reason})
-            if len(gated_consensus) >= target_size:
-                break
-
-    final_consensus = _dedupe_preserve_order(gated_consensus)[:target_size]
-    if len(final_consensus) < target_size:
-        for topic_id in base_consensus:
-            if topic_id in final_consensus or topic_id in vetoed:
-                continue
-            item = ranked_map.get(topic_id)
-            if not item:
-                continue
-            state = states.get(topic_id)
-            if not state:
-                continue
-            passed, reason = _consensus_hard_gate(item, state)
-            if not passed:
-                vetoed.append(topic_id)
-                gated.append({"topic_id": topic_id, "reason": reason})
+            if topic_id not in states:
                 continue
             final_consensus.append(topic_id)
             if len(final_consensus) >= target_size:
                 break
 
-    dedup_vetoed: list[str] = []
-    for topic_id in vetoed:
-        if topic_id not in dedup_vetoed:
-            dedup_vetoed.append(topic_id)
-
-    dedup_gated: list[dict[str, str]] = []
-    seen_gated = set[str]()
-    for entry in gated:
-        key = entry.get("topic_id")
-        if not isinstance(key, str) or key in seen_gated:
-            continue
-        dedup_gated.append(entry)
-        seen_gated.add(key)
+    concerns: list[dict[str, str]] = []
+    concerns_raw = llm_result.get("concerns", [])
+    if isinstance(concerns_raw, list):
+        for item in concerns_raw:
+            if isinstance(item, str):
+                concerns.append({"topic_id": item, "reason": "llm concern"})
+            elif isinstance(item, dict) and isinstance(item.get("topic_id"), str):
+                concerns.append(
+                    {
+                        "topic_id": item["topic_id"],
+                        "reason": str(item.get("reason", "")).strip() or "llm concern",
+                    }
+                )
 
     return {
-        "method": "llm-assisted-hybrid" if status == "ok" else "rule-only",
-        "status": status,
-        "base_consensus": base_consensus,
-        "final_consensus_ids": final_consensus[:target_size],
-        "final_rationale": llm_rationale,
-        "llm": llm_overall,
+        "method": "llm-only",
+        "status": "ok",
+        "final_consensus_ids": final_consensus,
+        "final_rationale": str(llm_result.get("rationale", "")).strip() or "llm consensus",
+        "llm": llm_result,
         "llm_raw_output": raw_output[:1200] if raw_output else "",
-        "concerns": llm_concerns,
-        "vetoed": dedup_vetoed,
-        "gating": dedup_gated,
+        "concerns": concerns,
+        "vetoed": [],
+        "gating": [],
         "payload": payload,
         "target_size": target_size,
         "requested_top_k": top_k,
@@ -2548,21 +3442,52 @@ def _as_markdown(
     discussion: list[dict] | None = None,
     debate_rounds: int = DEBATE_ROUNDS_DEFAULT,
     consensus_summary: dict | None = None,
+    orchestration_profile: str = ORCHESTRATION_PROFILE_DEFAULT,
+    orchestration_stages: list[str] | None = None,
+    pipeline_decisions: list[dict] | list[OrchestrationDecision] | None = None,
+    pipeline_stage_log: list[dict] | None = None,
+    service_scope: list[str] | None = None,
+    feature_scope: list[str] | None = None,
+    hierarchical_analysis: dict | None = None,
 ) -> str:
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    is_hierarchical = hierarchical_analysis is not None
+    if is_hierarchical:
+        agent_order = sorted(FLAT_MODE_AGENTS) + sorted(
+            name for name in AGENT_DEFINITIONS if name not in FLAT_MODE_AGENTS
+        )
+    else:
+        agent_order = [name for name in AGENT_FINAL_WEIGHTS]
+    agent_title_map = {
+        "CEO": "대표(CEO)",
+        "Planner": "기획자(Planner)",
+        "Developer": "개발자(Developer)",
+        "Researcher": "연구자(Researcher)",
+        "PM": "PM",
+        "Ops": "운영(Ops)",
+        "QA": "QA",
+        "SecuritySpecialist": "보안전문가(Security)",
+        "Linguist": "언어학자(Linguist)",
+        "MarketAnalyst": "시장분석가(Market)",
+        "FinanceAnalyst": "재무분석가(Finance)",
+        "UXVoiceDesigner": "음성UX설계(VoiceUX)",
+        "DataScientist": "데이터사이언티스트(DS)",
+        "DevOpsSRE": "데브옵스(DevOps/SRE)",
+        "QALead": "QA팀장(QALead)",
+    }
+    orchestration_stages = _normalize_stages(orchestration_stages, fallback=ORCHESTRATION_STAGES_DEFAULT)
+    pipeline_decisions = pipeline_decisions or []
+    pipeline_stage_log = pipeline_stage_log or []
+    service_scope = service_scope or []
+    feature_scope = feature_scope or []
     topic_name_by_id = {item["topic_id"]: item["topic_name"] for item in ranked}
     sources = research_sources or []
-    base_consensus = _build_consensus(agent_rankings, top_k=min(6, len(ranked)))
     final_consensus_ids = (
         consensus_summary.get("final_consensus_ids", [])
         if consensus_summary
         else []
     )
-    base_consensus_ids = consensus_summary.get("base_consensus", base_consensus) if consensus_summary else base_consensus
     consensus_lines = [f"- {topic_name_by_id.get(topic_id, topic_id)}" for topic_id in final_consensus_ids]
-    base_consensus_lines = [f"- {topic_name_by_id.get(topic_id, topic_id)}" for topic_id in base_consensus_ids]
-    if not consensus_lines:
-        consensus_lines = base_consensus_lines
     query_lines = [f"- {item['topic_name']}: `{item['web_query']}`" for item in queries]
     strategy_cards = _build_strategy_cards(top_topics, phases, states, agent_decisions, sources)
     source_lines = [
@@ -2573,17 +3498,21 @@ def _as_markdown(
         for item in sources[:20]
     ]
 
+    table_headers = ["순위", "주제"]
+    table_headers.extend(agent_order)
+    table_headers.extend(["통합점수", "피처 점수(영향/실행성/혁신성)"])
     table_rows = [
-        "| 순위 | 주제 | CEO | Planner | Developer | 통합점수 | 피처 점수(영향/실행성/혁신성) |",
-        "|---|---|---|---|---|---|---|",
+        "| " + " | ".join(table_headers) + " |",
+        "|" + "|".join(["---"] * len(table_headers)) + "|",
     ]
     for idx, item in enumerate(top_topics, start=1):
         feature = item["features"]
-        table_rows.append(
-            f"| {idx} | {item['topic_name']} | {item['ceo']} | {item['planner']} | "
-            f"{item['developer']} | {item['total_score']} | "
-            f"{feature['impact']} / {feature['feasibility']} / {feature['novelty']} |"
-        )
+        row_values = [str(idx), item["topic_name"]]
+        for agent in agent_order:
+            row_values.append(str(item.get(_agent_score_key(agent), 0.0)))
+        row_values.append(str(item["total_score"]))
+        row_values.append(f"{feature['impact']} / {feature['feasibility']} / {feature['novelty']}")
+        table_rows.append("| " + " | ".join(row_values) + " |")
 
     phases_md = []
     for phase in phases:
@@ -2604,8 +3533,15 @@ def _as_markdown(
     sections: list[str] = []
     sections.append(f"# {_format_report_title(version_tag, report_focus)}")
     sections.append(f"> **작성일**: {now}")
-    sections.append(f"**참여자**: 대표(CEO), 기획자(Planner), 개발자(Developer) 3인 회의")
+    sections.append(
+        "**참여자**: " + ", ".join(agent_title_map.get(agent, agent) for agent in agent_order)
+    )
     sections.append(f"**범위**: `{workspace}`")
+    sections.append(f"**오케스트레이션**: profile=`{orchestration_profile}` stages=`{','.join(orchestration_stages)}`")
+    if service_scope:
+        sections.append(f"**서비스 스코프**: {', '.join(service_scope)}")
+    if feature_scope:
+        sections.append(f"**기능 스코프**: {', '.join(feature_scope)}")
     sections.append("---")
     sections.append("## 1. 핵심 전략")
     sections.append("- 다중 에이전트 기반 토픽 점수, 역사 문서 히트율, 프로젝트별 구현성 힌트를 통합해 TOPIC을 선정합니다.")
@@ -2681,21 +3617,38 @@ def _as_markdown(
                     sections.append(f"- [{paper.get('title', 'reference')}]({paper.get('url', '')}){status_text} (`{arxiv_id}`)")
                 else:
                     sections.append(f"- [{paper.get('title', 'reference')}]({paper.get('url', '')}){status_text}")
-        sections.append("")
+    sections.append("")
 
-    sections.append("## 4. 에이전트 합의 논의")
-    sections.append("- CEO: 시장성/과제 가능성 중심으로 고점이 높은 주제 우선.")
-    sections.append("- Planner: 대화 체감 품질·업무 확장성·데이터 축적 효과를 우선.")
-    sections.append("- Developer: 기존 파이프라인 재사용 가능성과 단기 구현 난이도를 우선.")
+    sections.append("## 4. 오케스트레이션 단계 실행 로그")
+    if pipeline_stage_log:
+        for stage_item in pipeline_stage_log:
+            stage_name = stage_item.get("stage", "unknown")
+            stage_status = stage_item.get("status", "ok")
+            stage_message = stage_item.get("message", "")
+            sections.append(f"- [{stage_name}] {stage_status}: {stage_message}")
+    else:
+        sections.append("- 단계 로그가 기록되지 않았습니다.")
+    sections.append("")
+    sections.append("## 5. LLM 의사결정 객체")
+    if pipeline_decisions:
+        for decision in pipeline_decisions:
+            record = decision.to_dict() if isinstance(decision, OrchestrationDecision) else dict(decision)
+            sections.append(
+                f"- `{record.get('decision_id', '')}` | owner={record.get('owner', '')} | "
+                f"topic={record.get('topic_name', '')} | risk={record.get('risk', '')} | "
+                f"fail_label={record.get('fail_label', '')} | confidence={record.get('confidence', 0)}"
+            )
+            sections.append(f"  - rationale: {record.get('rationale', '')}")
+            sections.append(f"  - next_action: {record.get('next_action', '')} / due: {record.get('due', '')}")
+    else:
+        sections.append("- 생성된 의사결정 객체가 없습니다.")
     sections.append("")
     if consensus_summary:
-        sections.append("## 5. LLM 보조 합의 결과")
-        sections.append(f"- 합의 방식: {consensus_summary.get('method', 'rule-only')}")
+        sections.append("## 6. LLM 보조 합의 결과")
+        sections.append(f"- 합의 방식: {consensus_summary.get('method', 'llm-only')}")
         sections.append(f"- LLM 합의 상태: {consensus_summary.get('status', 'disabled')}")
         sections.append(f"- 최종 후보 반영 사유: {consensus_summary.get('final_rationale', '') or 'rule_only'}")
-        base_ids = consensus_summary.get("base_consensus", base_consensus)
-        sections.append("- Rule 합의 결과(요약): " + ", ".join(topic_name_by_id.get(topic_id, topic_id) for topic_id in base_ids))
-        sections.append("- LLM/하드게이트 최종 합의: " + ", ".join(topic_name_by_id.get(topic_id, topic_id) for topic_id in final_consensus_ids))
+        sections.append("- LLM 최종 합의: " + ", ".join(topic_name_by_id.get(topic_id, topic_id) for topic_id in final_consensus_ids))
         concerns = consensus_summary.get("concerns", [])
         if concerns:
             sections.append("- LLM 우려 항목:")
@@ -2719,38 +3672,41 @@ def _as_markdown(
                     reason = ""
                 sections.append(f"  - {topic_name_by_id.get(topic_id, topic_id)}: {reason}")
         sections.append("")
-    sections.append("## 6. 구현 권장 로드맵")
+    sections.append("## 7. 구현 권장 로드맵")
     sections.extend(phases_md if phases_md else ["- 해당 토픽의 근거가 부족하여 즉시 실행 불가"])
     sections.append("")
-    sections.append("## 7. 시너지 추정")
+    sections.append("## 8. 시너지 추정")
     sections.extend(synergy_lines if synergy_lines else ["- 현재 증거 기반 교집합이 적어 정책/UX/모니터링 레이어 기준으로 간접 연계 권장"])
     sections.append("")
-    sections.append("## 8. 협력 에이전트 Top3")
+    sections.append("## 9. 협력 에이전트 Top3")
     for agent, top_ids in agent_rankings.items():
         sections.append(f"### {agent}")
         for idx, topic_id in enumerate(top_ids[:3], start=1):
-            sections.append(f"- {idx}위: {topic_name_by_id.get(topic_id, topic_id)} ({scores[topic_id][agent]})")
+            sections.append(
+                f"- {idx}위: {topic_name_by_id.get(topic_id, topic_id)} "
+                f"({scores[topic_id].get(_agent_score_key(agent), 0.0)})"
+            )
     sections.append("")
-    sections.append("## 9. 합의 후보")
-    sections.extend(consensus_lines if consensus_lines else ["- 3인 공통 상위 항목이 부족함"])
+    sections.append("## 10. 합의 후보")
+    sections.extend(consensus_lines if consensus_lines else ["- LLM 합의 항목이 없습니다."])
     sections.append("")
-    sections.append("## 10. 자동 웹 검증 큐")
+    sections.append("## 11. 자동 웹 검증 큐")
     sections.extend(query_lines if query_lines else ["- 이번 분석에서 생성된 후보 쿼리 없음"])
     sections.append("")
-    sections.append("## 11. 연구 근거 후보")
+    sections.append("## 12. 연구 근거 후보")
     sections.extend(source_lines if source_lines else ["- 연구 출처 후보가 부족함"])
     sections.append("")
-    sections.append("## 12. 상위 주제 근거 (최대 1개 발췌 근거)")
+    sections.append("## 13. 상위 주제 근거 (최대 1개 발췌 근거)")
     sections.extend(evidence_md if evidence_md else ["- 상위 항목 근거가 충분히 수집되지 않음"])
 
     sections.append("")
     executed_rounds = len(discussion or [])
-    sections.append(f"## 13. 에이전트 토론 로그 (요청 {debate_rounds}라운드 / 실행 {executed_rounds}라운드)")
+    sections.append(f"## 14. 에이전트 토론 로그 (요청 {debate_rounds}라운드 / 실행 {executed_rounds}라운드)")
     if not discussion:
         sections.append("- 이번 실행에서 토론 로그 미생성")
     else:
         for round_log in discussion:
-            sections.append(f"### Round {round_log['round']}")
+            sections.append(f"### Round {round_log.get('round', 'N/A')}")
             pre = round_log.get("pre_round_top3", [])
             post = round_log.get("post_round_top3", [])
             pre_margin = round_log.get("pre_margin", 0.0)
@@ -2776,7 +3732,430 @@ def _as_markdown(
                     f"confidence {msg.get('confidence', 0):.2f}, evidence {msg.get('evidence_weight', 0):.2f}): {msg['reason']}"
                 )
 
+    # --- Hierarchical Analysis Section ---
+    if hierarchical_analysis:
+        sections.append("")
+        sections.append("## 15. 계층적 분석 요약 (4-Tier Hierarchical)")
+        sections.append(f"- 분석 모드: `{hierarchical_analysis.get('mode', 'hierarchical')}`")
+        sections.append("")
+
+        # Tier 1: Practitioner scores
+        sections.append("### Tier 1: 실무 전문가 평가")
+        t1_agents = sorted(hierarchical_analysis.get("tier1", {}).get("agents", []))
+        t1_scores = hierarchical_analysis.get("tier1", {}).get("scores", {})
+        if t1_agents and t1_scores:
+            t1_headers = ["주제"] + [agent_title_map.get(a, a) for a in t1_agents]
+            sections.append("| " + " | ".join(t1_headers) + " |")
+            sections.append("|" + "|".join(["---"] * len(t1_headers)) + "|")
+            for item in top_topics:
+                topic_id = item["topic_id"]
+                row = [item["topic_name"]]
+                for agent in t1_agents:
+                    row.append(str(t1_scores.get(topic_id, {}).get(_agent_score_key(agent), "-")))
+                sections.append("| " + " | ".join(row) + " |")
+        else:
+            sections.append("- Tier 1 스코어 데이터 없음")
+        sections.append("")
+
+        # Tier 2: Team lead aggregation
+        sections.append("### Tier 2: 팀 리드 종합")
+        t2_leads = hierarchical_analysis.get("tier2", {}).get("leads", [])
+        t2_scores = hierarchical_analysis.get("tier2", {}).get("scores", {})
+        t2_flags = hierarchical_analysis.get("tier2", {}).get("flags", {})
+        if t2_leads and t2_scores:
+            blend = hierarchical_analysis.get("tier2", {}).get("subordinate_blend", SUBORDINATE_BLEND_DEFAULT)
+            sections.append(f"- 하위 에이전트 블렌드 비율: {blend:.0%} 하위 / {1 - blend:.0%} 리드 자체 평가")
+            t2_headers = ["주제"] + [agent_title_map.get(l, l) for l in t2_leads] + ["QA 경고"]
+            sections.append("| " + " | ".join(t2_headers) + " |")
+            sections.append("|" + "|".join(["---"] * len(t2_headers)) + "|")
+            for item in top_topics:
+                topic_id = item["topic_id"]
+                row = [item["topic_name"]]
+                for lead in t2_leads:
+                    row.append(str(t2_scores.get(topic_id, {}).get(_agent_score_key(lead), "-")))
+                flags_for_topic = t2_flags.get(topic_id, [])
+                row.append("; ".join(flags_for_topic) if flags_for_topic else "-")
+                sections.append("| " + " | ".join(row) + " |")
+        sections.append("")
+
+        # Tier 3: Director debate
+        sections.append("### Tier 3: 디렉터 토론")
+        t3_data = hierarchical_analysis.get("tier3", {})
+        t3_rounds = t3_data.get("debate_rounds", 0)
+        t3_debate_log = t3_data.get("debate_log", [])
+        sections.append(f"- 토론 라운드: {t3_rounds}")
+        if t3_debate_log:
+            for round_entry in t3_debate_log:
+                sections.append(f"#### Round {round_entry.get('round', 'N/A')}")
+                for msg in round_entry.get("messages", []):
+                    sections.append(
+                        f"- {msg.get('speaker', '?')} {msg.get('action', '?')} → "
+                        f"{msg.get('topic_name', msg.get('topic_id', '?'))} "
+                        f"(delta {msg.get('delta', 0):.2f})"
+                    )
+        else:
+            sections.append("- 토론 로그 없음 (라운드 0 또는 스킵)")
+        sections.append("")
+
+        # Tier 4: CEO final
+        sections.append("### Tier 4: CEO 최종 결정")
+        t4_data = hierarchical_analysis.get("tier4", {})
+        t4_scores = t4_data.get("scores", {})
+        penalty_topics = t4_data.get("qa_penalty_topics", [])
+        if penalty_topics:
+            sections.append(f"- QA 게이트 페널티 적용 토픽: {', '.join(topic_name_by_id.get(t, t) for t in penalty_topics)}")
+        for item in top_topics:
+            tid = item["topic_id"]
+            ceo_s = t4_scores.get(tid, {}).get(_agent_score_key("CEO"), "-")
+            penalty_mark = " ⚠️ QA 페널티" if tid in penalty_topics else ""
+            sections.append(f"- {item['topic_name']}: CEO 점수 {ceo_s}{penalty_mark}")
+        sections.append("")
+
+        # Tier score breakdown
+        sections.append("### 최종 Tier 가중 합산")
+        sections.append(f"- Tier4(CEO) {HIERARCHICAL_FINAL_WEIGHTS['tier4_weight']:.0%} + "
+                        f"Tier3(디렉터) {HIERARCHICAL_FINAL_WEIGHTS['tier3_weight']:.0%} + "
+                        f"Tier2(팀리드) {HIERARCHICAL_FINAL_WEIGHTS['tier2_weight']:.0%} + "
+                        f"Tier1(실무) {HIERARCHICAL_FINAL_WEIGHTS['tier1_weight']:.0%}")
+        for item in top_topics[:6]:
+            ts_data = item.get("tier_scores", {})
+            sections.append(
+                f"- {item['topic_name']}: T1={ts_data.get('tier1_avg', '-')} "
+                f"T2={ts_data.get('tier2_weighted', '-')} "
+                f"T3={ts_data.get('tier3_debated', '-')} "
+                f"T4={ts_data.get('tier4_ceo', '-')} "
+                f"→ 합산={item.get('total_score', '-')}"
+            )
+        sections.append("")
+
     return "\n".join(sections) + "\n\n"
+
+
+# ---------------------------------------------------------------------------
+# Hierarchical 4-Tier pipeline execution functions
+# ---------------------------------------------------------------------------
+
+def _execute_tier1(
+    states: dict[str, TopicState],
+) -> TierResult:
+    """Tier 1: All practitioner agents score independently."""
+    tier1_agent_names = sorted(TIER_1_AGENTS)
+    tier1_weights = {name: AGENT_DEFINITIONS[name]["weights"] for name in tier1_agent_names}
+    agent_scores: dict[str, dict[str, float]] = {}
+    for topic_id, state in states.items():
+        feat = state.compute_features()
+        per_topic: dict[str, float] = {}
+        for agent_name in tier1_agent_names:
+            weights = tier1_weights[agent_name]
+            score = (
+                weights["impact"] * feat["impact"]
+                + weights["novelty"] * feat["novelty"]
+                + weights["feasibility"] * feat["feasibility"]
+                + weights["research_signal"] * feat["research_signal"]
+                + weights["risk"] * feat["risk_penalty"]
+            )
+            per_topic[_agent_score_key(agent_name)] = round(score, 2)
+        agent_scores[topic_id] = per_topic
+    return TierResult(
+        tier=1,
+        tier_label="practitioners",
+        agent_scores=agent_scores,
+        metadata={"agents": tier1_agent_names},
+    )
+
+
+def _execute_tier2(
+    states: dict[str, TopicState],
+    tier1_result: TierResult,
+    subordinate_blend: float = SUBORDINATE_BLEND_DEFAULT,
+    qa_gate_threshold: float = QA_GATE_THRESHOLD_DEFAULT,
+) -> TierResult:
+    """Tier 2: Team leads aggregate subordinate scores + own evaluation."""
+    lead_names = sorted(TIER_2_DOMAIN_MAP.keys())
+    lead_weights = {name: AGENT_DEFINITIONS[name]["weights"] for name in lead_names}
+    agent_scores: dict[str, dict[str, float]] = {}
+    flags: dict[str, list[str]] = {}
+
+    for topic_id, state in states.items():
+        feat = state.compute_features()
+        per_topic: dict[str, float] = {}
+        for lead_name in lead_names:
+            domain = TIER_2_DOMAIN_MAP[lead_name]
+            sub_agents = domain["tier1_agents"]
+            intra_w = domain["intra_weights"]
+            aggregation = domain.get("aggregation", "weighted_mean")
+
+            # subordinate weighted mean
+            sub_sum = 0.0
+            w_sum = 0.0
+            min_sub_score = 10.0
+            for sub_agent in sub_agents:
+                sub_key = _agent_score_key(sub_agent)
+                sub_score = tier1_result.agent_scores.get(topic_id, {}).get(sub_key, 5.0)
+                w = intra_w.get(sub_agent, 1.0 / max(1, len(sub_agents)))
+                sub_sum += w * sub_score
+                w_sum += w
+                min_sub_score = min(min_sub_score, sub_score)
+            sub_avg = sub_sum / max(w_sum, 1e-9)
+
+            # lead's own evaluation
+            weights = lead_weights[lead_name]
+            lead_own = (
+                weights["impact"] * feat["impact"]
+                + weights["novelty"] * feat["novelty"]
+                + weights["feasibility"] * feat["feasibility"]
+                + weights["research_signal"] * feat["research_signal"]
+                + weights["risk"] * feat["risk_penalty"]
+            )
+
+            # blend: subordinate_blend * sub_avg + (1 - subordinate_blend) * lead_own
+            blended = subordinate_blend * sub_avg + (1.0 - subordinate_blend) * lead_own
+            blended = round(blended, 2)
+
+            # QALead: min_gated_mean check
+            if aggregation == "min_gated_mean":
+                gate = domain.get("gate_threshold", qa_gate_threshold)
+                if min_sub_score < gate:
+                    flags.setdefault(topic_id, []).append(
+                        f"QA gate: {lead_name} min_sub_score={min_sub_score:.2f} < threshold={gate}"
+                    )
+
+            per_topic[_agent_score_key(lead_name)] = _clamp_score(blended)
+        agent_scores[topic_id] = per_topic
+
+    return TierResult(
+        tier=2,
+        tier_label="team_leads",
+        agent_scores=agent_scores,
+        flags=flags,
+        metadata={"leads": lead_names, "subordinate_blend": subordinate_blend},
+    )
+
+
+def _execute_tier3(
+    states: dict[str, TopicState],
+    tier2_result: TierResult,
+    debate_rounds: int = 2,
+) -> TierResult:
+    """Tier 3: Cross-domain debate among Tier2 leads."""
+    if debate_rounds <= 0:
+        return TierResult(
+            tier=3,
+            tier_label="directors",
+            agent_scores=copy.deepcopy(tier2_result.agent_scores),
+            debate_log=[],
+            flags=copy.deepcopy(tier2_result.flags),
+            metadata={"debate_rounds": 0, "skipped": True},
+        )
+
+    lead_names = sorted(TIER_2_DOMAIN_MAP.keys())
+    working = copy.deepcopy(tier2_result.agent_scores)
+    debate_log: list[dict] = []
+
+    for round_no in range(1, debate_rounds + 1):
+        round_messages: list[dict] = []
+        for topic_id, state in states.items():
+            if topic_id not in working:
+                continue
+            feat = state.compute_features()
+            for lead_name in lead_names:
+                lead_key = _agent_score_key(lead_name)
+                current = working[topic_id].get(lead_key, 5.0)
+                supports = _supports_candidate(lead_name, state, feat)
+                challenges = _challenges_candidate(lead_name, state, feat)
+                if supports and not challenges:
+                    delta = DEBATE_SUPPORT_DELTA * 0.5
+                    action = "support"
+                elif challenges and not supports:
+                    delta = DEBATE_CHALLENGE_DELTA * 0.5
+                    action = "challenge"
+                else:
+                    delta = 0.0
+                    action = "hold"
+                if abs(delta) > 0:
+                    # apply trust-weighted adjustment to other leads
+                    trust_map = HIERARCHICAL_TRUST.get(lead_name, {})
+                    for other_lead in lead_names:
+                        if other_lead == lead_name:
+                            continue
+                        other_key = _agent_score_key(other_lead)
+                        if other_key not in working[topic_id]:
+                            continue
+                        trust = trust_map.get(other_lead, 0.70)
+                        applied = delta * DEBATE_INFLUENCE_OTHER * trust
+                        working[topic_id][other_key] = _clamp_score(
+                            working[topic_id][other_key] + applied
+                        )
+                    # apply self
+                    self_applied = delta * DEBATE_INFLUENCE_SELF
+                    working[topic_id][lead_key] = _clamp_score(current + self_applied)
+
+                    round_messages.append({
+                        "round": round_no,
+                        "speaker": lead_name,
+                        "action": action,
+                        "topic_id": topic_id,
+                        "topic_name": state.topic_name,
+                        "delta": round(delta, 4),
+                    })
+
+        debate_log.append({
+            "round": round_no,
+            "messages": round_messages,
+        })
+
+    return TierResult(
+        tier=3,
+        tier_label="directors",
+        agent_scores=working,
+        debate_log=debate_log,
+        flags=copy.deepcopy(tier2_result.flags),
+        metadata={"debate_rounds": debate_rounds},
+    )
+
+
+def _execute_tier4(
+    states: dict[str, TopicState],
+    tier3_result: TierResult,
+) -> TierResult:
+    """Tier 4: CEO final decision with QA flag penalty."""
+    ceo_weights = AGENT_DEFINITIONS["CEO"]["weights"]
+    agent_scores: dict[str, dict[str, float]] = {}
+
+    for topic_id, state in states.items():
+        feat = state.compute_features()
+        ceo_score = (
+            ceo_weights["impact"] * feat["impact"]
+            + ceo_weights["novelty"] * feat["novelty"]
+            + ceo_weights["feasibility"] * feat["feasibility"]
+            + ceo_weights["research_signal"] * feat["research_signal"]
+            + ceo_weights["risk"] * feat["risk_penalty"]
+        )
+        # Apply QA flag penalty
+        if topic_id in tier3_result.flags:
+            ceo_score *= (1.0 - QA_GATE_PENALTY)
+        agent_scores[topic_id] = {_agent_score_key("CEO"): round(ceo_score, 2)}
+
+    return TierResult(
+        tier=4,
+        tier_label="executives",
+        agent_scores=agent_scores,
+        flags=copy.deepcopy(tier3_result.flags),
+        metadata={"qa_penalty_applied": list(tier3_result.flags.keys())},
+    )
+
+
+def _build_hierarchical_final_scores(
+    states: dict[str, TopicState],
+    tier_results: dict[int, TierResult],
+) -> list[dict]:
+    """Build final ranked list from 4-tier weighted aggregation."""
+    w = HIERARCHICAL_FINAL_WEIGHTS
+    tier4_w = w["tier4_weight"]
+    tier3_w = w["tier3_weight"]
+    tier2_w = w["tier2_weight"]
+    tier1_w = w["tier1_weight"]
+    lead_weights = w["tier2_lead_weights"]
+
+    output: list[dict] = []
+    for topic_id, state in states.items():
+        feat = state.compute_features()
+
+        # Tier 4: CEO score
+        t4_score = tier_results[4].agent_scores.get(topic_id, {}).get(
+            _agent_score_key("CEO"), 5.0
+        )
+
+        # Tier 3: average of tier2 lead scores after debate
+        t3_scores = tier_results[3].agent_scores.get(topic_id, {})
+        t3_total = 0.0
+        for lead_name, lw in lead_weights.items():
+            t3_total += lw * t3_scores.get(_agent_score_key(lead_name), 5.0)
+
+        # Tier 2: average of tier2 lead scores before debate
+        t2_scores = tier_results[2].agent_scores.get(topic_id, {})
+        t2_total = 0.0
+        for lead_name, lw in lead_weights.items():
+            t2_total += lw * t2_scores.get(_agent_score_key(lead_name), 5.0)
+
+        # Tier 1: simple average of all practitioners
+        t1_scores = tier_results[1].agent_scores.get(topic_id, {})
+        t1_vals = list(t1_scores.values())
+        t1_avg = sum(t1_vals) / max(len(t1_vals), 1)
+
+        total = (
+            tier4_w * t4_score
+            + tier3_w * t3_total
+            + tier2_w * t2_total
+            + tier1_w * t1_avg
+        )
+        total = round(total, 2)
+
+        row: dict[str, object] = {
+            "topic_id": topic_id,
+            "topic_name": state.topic_name,
+            "total_score": total,
+            "features": feat,
+            "project_count": state.project_count,
+            "evidence_count": len(state.evidence),
+            "evidence": [e.snippet for e in state.evidence[:4]],
+            "tier_scores": {
+                "tier1_avg": round(t1_avg, 2),
+                "tier2_weighted": round(t2_total, 2),
+                "tier3_debated": round(t3_total, 2),
+                "tier4_ceo": round(t4_score, 2),
+            },
+            "qa_flags": tier_results.get(3, TierResult(3, "directors", {})).flags.get(topic_id, []),
+        }
+        # include per-agent scores from all tiers
+        for tier_num in (1, 2, 3, 4):
+            tr = tier_results.get(tier_num)
+            if tr:
+                for agent_key, score in tr.agent_scores.get(topic_id, {}).items():
+                    row[agent_key] = score
+        output.append(row)
+
+    output.sort(key=lambda x: x["total_score"], reverse=True)
+    return output
+
+
+def _run_hierarchical_pipeline(
+    states: dict[str, TopicState],
+    tier3_debate_rounds: int = 2,
+    subordinate_blend: float = SUBORDINATE_BLEND_DEFAULT,
+    qa_gate_threshold: float = QA_GATE_THRESHOLD_DEFAULT,
+) -> HierarchicalPipelineState:
+    """Run the full Tier1 -> Tier2 -> Tier3 -> Tier4 pipeline."""
+    pipeline = HierarchicalPipelineState(mode="hierarchical")
+
+    # Tier 1
+    pipeline.execution_log.append({"tier": 1, "status": "started"})
+    t1 = _execute_tier1(states)
+    pipeline.tier_results[1] = t1
+    pipeline.execution_log.append({"tier": 1, "status": "completed", "agents": len(TIER_1_AGENTS)})
+
+    # Tier 2
+    pipeline.execution_log.append({"tier": 2, "status": "started"})
+    t2 = _execute_tier2(states, t1, subordinate_blend=subordinate_blend, qa_gate_threshold=qa_gate_threshold)
+    pipeline.tier_results[2] = t2
+    pipeline.execution_log.append({"tier": 2, "status": "completed", "flags": len(t2.flags)})
+
+    # Tier 3
+    pipeline.execution_log.append({"tier": 3, "status": "started"})
+    t3 = _execute_tier3(states, t2, debate_rounds=tier3_debate_rounds)
+    pipeline.tier_results[3] = t3
+    pipeline.execution_log.append({"tier": 3, "status": "completed", "debate_rounds": tier3_debate_rounds})
+
+    # Tier 4
+    pipeline.execution_log.append({"tier": 4, "status": "started"})
+    t4 = _execute_tier4(states, t3)
+    pipeline.tier_results[4] = t4
+    pipeline.execution_log.append({"tier": 4, "status": "completed"})
+
+    # Final ranking
+    pipeline.final_ranking = _build_hierarchical_final_scores(states, pipeline.tier_results)
+
+    return pipeline
 
 
 def _to_json(
@@ -2792,13 +4171,29 @@ def _to_json(
     discussion: list[dict] | None = None,
     debate_rounds: int = DEBATE_ROUNDS_DEFAULT,
     consensus_summary: dict | None = None,
+    orchestration_profile: str = ORCHESTRATION_PROFILE_DEFAULT,
+    orchestration_stages: list[str] | None = None,
+    service_scope: list[str] | None = None,
+    feature_scope: list[str] | None = None,
+    pipeline_decisions: list[dict] | list[OrchestrationDecision] | None = None,
+    pipeline_stage_log: list[dict] | None = None,
+    hierarchical_analysis: dict | None = None,
 ) -> dict:
     agent_rankings = _build_agent_rankings(scores, top_k=max(1, len(ranked)))
-    consensus = _build_consensus(agent_rankings, top_k=min(8, len(ranked)))
+    consensus = []
+    if consensus_summary:
+        consensus = list(consensus_summary.get("final_consensus_ids", []))
     research_queries = _build_research_queries(ranked, top_k=min(6, len(ranked)))
     selected = ranked[:len(ranked)]
-    agent_decisions = selected_agent_decisions or _build_agent_decisions(selected, states)
-    return {
+    agent_decisions = selected_agent_decisions or {}
+    orchestration_stages = _normalize_stages(orchestration_stages, fallback=ORCHESTRATION_STAGES_DEFAULT)
+    pipeline_decisions = pipeline_decisions or []
+    stage_log = pipeline_stage_log or []
+    decision_records = [
+        decision.to_dict() if isinstance(decision, OrchestrationDecision) else dict(decision)
+        for decision in pipeline_decisions
+    ]
+    result = {
         "report_version": version_tag,
         "report_focus": report_focus,
         "generated_at": dt.datetime.now().isoformat(),
@@ -2823,7 +4218,18 @@ def _to_json(
         "research_queries": research_queries,
         "ranked": ranked,
         "phases": phases,
+        "orchestration": {
+            "profile": orchestration_profile,
+            "stages": orchestration_stages,
+            "service_scope": service_scope or [],
+            "feature_scope": feature_scope or [],
+            "pipeline_decisions": decision_records,
+            "stage_log": stage_log,
+        },
     }
+    if hierarchical_analysis:
+        result["hierarchical_analysis"] = hierarchical_analysis
+    return result
 
 
 def generate_report(
@@ -2838,32 +4244,286 @@ def generate_report(
     report_focus: str = "",
     version_tag: str = "V10",
     debate_rounds: int = DEBATE_ROUNDS_DEFAULT,
+    orchestration_profile: str = ORCHESTRATION_PROFILE_DEFAULT,
+    orchestration_stages: list[str] | str | None = None,
+    service_scope: list[str] | str | None = None,
+    feature_scope: list[str] | str | None = None,
+    llm_deliberation_cmd: str | None = None,
+    llm_deliberation_timeout: float = LLM_DELIBERATION_TIMEOUT_SECONDS,
     llm_consensus_cmd: str | None = None,
     llm_consensus_timeout: float = LLM_CONSENSUS_TIMEOUT_SECONDS,
+    agent_mode: str = "flat",
+    tier3_debate_rounds: int = 2,
+    qa_gate_threshold: float = QA_GATE_THRESHOLD_DEFAULT,
+    subordinate_blend: float = SUBORDINATE_BLEND_DEFAULT,
 ) -> dict:
+    agent_mode = (agent_mode or "flat").strip().lower()
+    if agent_mode not in ("flat", "hierarchical"):
+        agent_mode = "flat"
+
+    profile = (orchestration_profile or ORCHESTRATION_PROFILE_DEFAULT).strip().lower()
+    if profile not in ORCHESTRATION_PROFILE_LABELS:
+        profile = ORCHESTRATION_PROFILE_DEFAULT
+    stages = _normalize_stages(
+        orchestration_stages if orchestration_stages is not None else ORCHESTRATION_STAGES_DEFAULT,
+        fallback=ORCHESTRATION_STAGES_DEFAULT,
+    )
+    service_scope_tokens = _parse_service_scope_tokens(service_scope)
+    service_scope_list = _build_service_scope(service_scope_tokens)
+    if isinstance(feature_scope, str):
+        feature_scope_list = [token.strip() for token in feature_scope.split(",") if token.strip()]
+    else:
+        feature_scope_list = [str(token).strip() for token in (feature_scope or []) if str(token).strip()]
+    stage_log: list[dict] = []
+    pipeline_decisions: list[OrchestrationDecision] = []
+
+    stage_log.append(
+        {
+            "stage": ORCHESTRATION_STAGE_ANALYSIS,
+            "status": "started",
+            "message": f"workspace scan start (service_scope={','.join(service_scope_list)})",
+        }
+    )
     states = analyze_workspace(
         workspace=workspace,
         extensions=extensions,
         ignore_dirs=ignore_dirs,
         max_files=max_files,
         history_files=history_files,
+        service_scope=service_scope_tokens,
     )
-    base_scores = score_by_agents(states)
-    discussed_scores, discussion = simulate_roundtable_deliberation(
-        states=states,
-        initial_scores=base_scores,
-        rounds=max(0, debate_rounds),
+    stage_log.append(
+        {
+            "stage": ORCHESTRATION_STAGE_ANALYSIS,
+            "status": "completed",
+            "message": f"topic_count={len(states)}",
+        }
     )
-    scores = discussed_scores
+    # -----------------------------------------------------------------------
+    # Hierarchical mode: 4-Tier pipeline
+    # -----------------------------------------------------------------------
+    if agent_mode == "hierarchical":
+        stage_log.append({
+            "stage": "hierarchical_pipeline",
+            "status": "started",
+            "message": f"agent_mode=hierarchical tier3_rounds={tier3_debate_rounds}",
+        })
+        h_pipeline = _run_hierarchical_pipeline(
+            states=states,
+            tier3_debate_rounds=max(0, tier3_debate_rounds),
+            subordinate_blend=subordinate_blend,
+            qa_gate_threshold=qa_gate_threshold,
+        )
+        ranked = h_pipeline.final_ranking
+        stage_log.append({
+            "stage": "hierarchical_pipeline",
+            "status": "completed",
+            "message": f"tiers=4, topics={len(ranked)}",
+        })
+
+        selected = ranked[:top_k]
+        phases = _build_phase_plan(selected, top_k=top_k)
+        synergy = _build_synergy_graph(states, selected)
+
+        # Build a flat-compatible scores dict from hierarchical results for report compatibility
+        scores: dict[str, dict[str, float]] = {}
+        for topic_id in states:
+            per_topic: dict[str, float] = {}
+            for tier_num in (1, 2, 3, 4):
+                tr = h_pipeline.tier_results.get(tier_num)
+                if tr:
+                    for ak, av in tr.agent_scores.get(topic_id, {}).items():
+                        per_topic[ak] = av
+            scores[topic_id] = per_topic
+
+        agent_rankings = _build_agent_rankings(scores, top_k=top_k)
+
+        queries = _build_research_queries(selected, top_k=min(6, top_k))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        research_sources = _build_sources_file(
+            output_dir=output_dir,
+            version_tag=version_tag,
+            report_focus=report_focus,
+            top_topics=selected,
+        )
+
+        hierarchical_analysis = {
+            "mode": "hierarchical",
+            "tier1": {
+                "agents": list(TIER_1_AGENTS),
+                "scores": h_pipeline.tier_results[1].agent_scores,
+            },
+            "tier2": {
+                "leads": list(TIER_2_DOMAIN_MAP.keys()),
+                "scores": h_pipeline.tier_results[2].agent_scores,
+                "flags": h_pipeline.tier_results[2].flags,
+                "subordinate_blend": subordinate_blend,
+            },
+            "tier3": {
+                "debate_rounds": tier3_debate_rounds,
+                "scores": h_pipeline.tier_results[3].agent_scores,
+                "debate_log": h_pipeline.tier_results[3].debate_log or [],
+                "flags": h_pipeline.tier_results[3].flags,
+            },
+            "tier4": {
+                "scores": h_pipeline.tier_results[4].agent_scores,
+                "qa_penalty_topics": h_pipeline.tier_results[4].metadata.get("qa_penalty_applied", []),
+            },
+            "execution_log": h_pipeline.execution_log,
+        }
+
+        markdown = _as_markdown(
+            workspace=workspace,
+            top_topics=selected,
+            states=states,
+            scores=scores,
+            ranked=ranked,
+            agent_rankings=agent_rankings,
+            phases=phases,
+            synergy_lines=synergy,
+            queries=queries,
+            report_focus=report_focus,
+            version_tag=version_tag,
+            research_sources=research_sources,
+            orchestration_profile=profile,
+            orchestration_stages=stages,
+            pipeline_stage_log=stage_log,
+            service_scope=service_scope_list,
+            feature_scope=feature_scope_list,
+            hierarchical_analysis=hierarchical_analysis,
+        )
+
+        ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        md_path = output_dir / f"{output_name}_{ts}.md"
+        js_path = output_dir / f"{output_name}_{ts}.json"
+
+        data = _to_json(
+            states=states,
+            scores=scores,
+            scores_initial=scores,
+            ranked=ranked,
+            phases=phases,
+            report_focus=report_focus,
+            version_tag=version_tag,
+            research_sources=research_sources,
+            orchestration_profile=profile,
+            orchestration_stages=stages,
+            service_scope=service_scope_list,
+            feature_scope=feature_scope_list,
+            pipeline_stage_log=stage_log,
+            hierarchical_analysis=hierarchical_analysis,
+        )
+        md_path.write_text(markdown, encoding="utf-8")
+        js_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        return {
+            "markdown_path": str(md_path),
+            "json_path": str(js_path),
+            "agent_rankings": agent_rankings,
+            "consensus": [],
+            "consensus_summary": {},
+            "top_topics": selected,
+            "debate_rounds_executed": tier3_debate_rounds,
+            "pipeline_decisions": [],
+            "orchestration": {
+                "profile": profile,
+                "stages": stages,
+                "service_scope": service_scope_list,
+                "feature_scope": feature_scope_list,
+                "stage_log": stage_log,
+            },
+            "hierarchical_analysis": hierarchical_analysis,
+            "agent_mode": "hierarchical",
+            "generated_at": data["generated_at"],
+        }
+
+    # -----------------------------------------------------------------------
+    # Flat mode (default): existing 7-agent pipeline — unchanged
+    # -----------------------------------------------------------------------
+    scores = _init_neutral_agent_scores(states, value=5.0)
+    discussion: list[dict] = []
+
+    deliberation_round_limit = ORCHESTRATION_PROFILE_ROUND_LIMITS.get(profile, ORCHESTRATION_PROFILE_ROUND_LIMITS[ORCHESTRATION_PROFILE_DEFAULT])
+    requested_rounds = max(0, debate_rounds)
+    effective_rounds = min(requested_rounds, deliberation_round_limit)
+    llm_deliberation_command = llm_deliberation_cmd or os.getenv(LLM_DELIBERATION_CMD_ENV) or llm_consensus_cmd
+
+    if ORCHESTRATION_STAGE_DELIBERATION in stages and effective_rounds > 0:
+        if not llm_deliberation_command:
+            raise RuntimeError("LLM deliberation command is required. Set --llm-deliberation-cmd or ORA_RD_LLM_DELIBERATION_CMD.")
+        stage_log.append(
+            {
+                "stage": ORCHESTRATION_STAGE_DELIBERATION,
+                "status": "started",
+                "message": f"rounds={effective_rounds} profile={profile}",
+            }
+        )
+        for round_no in range(1, effective_rounds + 1):
+            ranked_snapshot = _build_final_score(states, scores)
+            score_updates, decisions, round_summaries, llm_actions, llm_state = _llm_deliberation_round(
+                round_no=round_no,
+                stages=stages,
+                service_scope=service_scope_list,
+                states=states,
+                working_scores=scores,
+                ranked=ranked_snapshot,
+                previous_decisions=[decision.to_dict() for decision in pipeline_decisions],
+                previous_discussion=discussion,
+                command=llm_deliberation_command,
+                timeout=max(1.0, llm_deliberation_timeout),
+            )
+            for topic_id, per_agent in score_updates.items():
+                if topic_id not in scores:
+                    continue
+                for agent_name, delta in per_agent.items():
+                    agent_key = _agent_score_key(agent_name)
+                    if agent_key not in scores[topic_id]:
+                        continue
+                    scores[topic_id][agent_key] = _clamp_score(scores[topic_id][agent_key] + delta, 0.0, 10.0)
+
+            if decisions:
+                pipeline_decisions.extend(decisions)
+            if round_summaries:
+                for summary in round_summaries:
+                    if isinstance(summary, dict):
+                        discussion.append(summary)
+            if llm_actions:
+                discussion.append({"round": round_no, "messages": llm_actions, "stage": "llm_action_log"})
+
+            status = llm_state.get("status", "unknown")
+            stage_log.append(
+                {
+                    "stage": ORCHESTRATION_STAGE_DELIBERATION,
+                    "status": status,
+                    "message": f"round={round_no}, decisions={len(decisions)}",
+                }
+            )
+
+            if status != "ok":
+                if profile == ORCHESTRATION_PROFILE_STRICT:
+                    raise RuntimeError(f"LLM deliberation failed at round {round_no}: {llm_state}")
+                stage_log.append(
+                    {
+                        "stage": ORCHESTRATION_STAGE_DELIBERATION,
+                        "status": "stopped",
+                        "message": f"non-strict early-stop on round={round_no}",
+                    }
+                )
+                break
+    else:
+        discussion = []
+
     ranked = _build_final_score(states, scores)
 
     selected = ranked[:top_k]
     phases = _build_phase_plan(selected, top_k=top_k)
     synergy = _build_synergy_graph(states, selected)
-    all_decisions = _build_agent_decisions(ranked, states)
-    selected_decisions = {topic_id: all_decisions.get(topic_id, []) for topic_id in [item["topic_id"] for item in selected]}
-    agent_rankings = _build_agent_rankings(scores, top_k=top_k)
-    consensus = _build_consensus(agent_rankings, top_k=min(6, len(ranked)))
+    selected_decisions = _pipeline_decisions_to_topic_records(pipeline_decisions)
+    if not pipeline_decisions:
+        raise RuntimeError("LLM deliberation produced no decisions. Please adjust LLM command/output schema.")
+    agent_rankings = _build_agent_rankings(scores, top_k=top_k, agent_filter=FLAT_MODE_AGENTS)
+    if not llm_consensus_cmd and not llm_deliberation_command:
+        raise RuntimeError("LLM consensus command is required. Set --llm-consensus-cmd or --llm-deliberation-cmd.")
     consensus_summary = _apply_hybrid_consensus(
         ranked=ranked,
         states=states,
@@ -2874,6 +4534,25 @@ def generate_report(
         command=llm_consensus_cmd,
         timeout=llm_consensus_timeout,
     )
+    if consensus_summary.get("status") != "ok":
+        raise RuntimeError(f"LLM consensus failed: {consensus_summary.get('reason', consensus_summary.get('status'))}")
+    stage_log.append(
+        {
+            "stage": ORCHESTRATION_STAGE_DELIBERATION,
+            "status": "consensus_completed",
+            "message": f"consensus_method={consensus_summary.get('method', 'llm-only')}",
+        }
+    )
+
+    if ORCHESTRATION_STAGE_EXECUTION in stages:
+        stage_log.append(
+            {
+                "stage": ORCHESTRATION_STAGE_EXECUTION,
+                "status": "planned",
+                "message": f"decision_objects={len(pipeline_decisions)}",
+            }
+        )
+
     queries = _build_research_queries(selected, top_k=min(6, top_k))
     output_dir.mkdir(parents=True, exist_ok=True)
     research_sources = _build_sources_file(
@@ -2899,6 +4578,12 @@ def generate_report(
         discussion=discussion,
         debate_rounds=debate_rounds,
         consensus_summary=consensus_summary,
+        orchestration_profile=profile,
+        orchestration_stages=stages,
+        pipeline_decisions=pipeline_decisions,
+        pipeline_stage_log=stage_log,
+        service_scope=service_scope_list,
+        feature_scope=feature_scope_list,
     )
 
     ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2908,7 +4593,7 @@ def generate_report(
     data = _to_json(
         states=states,
         scores=scores,
-        scores_initial=base_scores,
+        scores_initial=scores,
         ranked=ranked,
         phases=phases,
         report_focus=report_focus,
@@ -2918,6 +4603,12 @@ def generate_report(
         discussion=discussion,
         debate_rounds=debate_rounds,
         consensus_summary=consensus_summary,
+        orchestration_profile=profile,
+        orchestration_stages=stages,
+        service_scope=service_scope_list,
+        feature_scope=feature_scope_list,
+        pipeline_decisions=pipeline_decisions,
+        pipeline_stage_log=stage_log,
     )
     md_path.write_text(markdown, encoding="utf-8")
     js_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -2926,9 +4617,18 @@ def generate_report(
         "markdown_path": str(md_path),
         "json_path": str(js_path),
         "agent_rankings": agent_rankings,
-        "consensus": consensus_summary.get("final_consensus_ids", consensus),
+        "consensus": consensus_summary.get("final_consensus_ids", []),
         "consensus_summary": consensus_summary,
         "top_topics": selected,
         "debate_rounds_executed": len(discussion),
+        "pipeline_decisions": [item.to_dict() for item in pipeline_decisions],
+        "orchestration": {
+            "profile": profile,
+            "stages": stages,
+            "service_scope": service_scope_list,
+            "feature_scope": feature_scope_list,
+            "stage_log": stage_log,
+        },
+        "agent_mode": "flat",
         "generated_at": data["generated_at"],
     }

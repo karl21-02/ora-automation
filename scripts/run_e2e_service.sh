@@ -186,7 +186,7 @@ case "$SERVICE_KEY" in
 
   *)
     echo "[error] 알 수 없는 서비스: $SERVICE"
-    echo "지원 서비스: b2b | android | b2c | ai | telecom"
+    echo "지원 서비스: b2b | b2b-android | android | b2c | ai | telecom"
     exit 1
     ;;
 esac

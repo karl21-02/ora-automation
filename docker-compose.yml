@@ -1,0 +1,164 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ora-automation-db
+    environment:
+      POSTGRES_DB: ora_automation
+      POSTGRES_USER: ora
+      POSTGRES_PASSWORD: ora
+    ports:
+      - "5432:5432"
+    volumes:
+      - ora_automation_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ora -d ora_automation"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: ora-automation-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ora-automation-api
+    working_dir: /workspace/Ora/ora-automation
+    command: uvicorn ora_automation_api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql+psycopg://ora:ora@db:5432/ora_automation
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      RABBITMQ_EXCHANGE: ora.automation
+      RABBITMQ_RETRY_EXCHANGE: ora.automation.retry
+      RABBITMQ_DLX_EXCHANGE: ora.automation.dlx
+      RABBITMQ_QUEUE_PREFIX: ora.automation.agent
+      ORA_AUTOMATION_LLM_PLANNER_CMD: ${ORA_AUTOMATION_LLM_PLANNER_CMD:-}
+      ORA_AUTOMATION_LLM_PLANNER_TIMEOUT_SECONDS: ${ORA_AUTOMATION_LLM_PLANNER_TIMEOUT_SECONDS:-30}
+      ORA_AUTOMATION_ROOT: /workspace/Ora/ora-automation
+      ORA_AUTOMATION_RUN_OUTPUT: /workspace/Ora/ora-automation/research_reports/api_runs
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ..:/workspace/Ora
+
+  worker-ceo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ora-automation-worker-ceo
+    working_dir: /workspace/Ora/ora-automation
+    command: python -m ora_automation_api.worker --agent-role ceo
+    environment: &worker-env
+      DATABASE_URL: postgresql+psycopg://ora:ora@db:5432/ora_automation
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      RABBITMQ_EXCHANGE: ora.automation
+      RABBITMQ_RETRY_EXCHANGE: ora.automation.retry
+      RABBITMQ_DLX_EXCHANGE: ora.automation.dlx
+      RABBITMQ_QUEUE_PREFIX: ora.automation.agent
+      ORA_AUTOMATION_ROOT: /workspace/Ora/ora-automation
+      ORA_AUTOMATION_RUN_OUTPUT: /workspace/Ora/ora-automation/research_reports/api_runs
+      PYTHONUNBUFFERED: "1"
+      # LLM / Gemini
+      ORA_RD_LLM_PROVIDER: gemini
+      GEMINI_MODEL: gemini-2.5-flash
+      GOOGLE_CLOUD_PROJECT_ID: ora-project-474413
+      GOOGLE_CLOUD_LOCATION: asia-northeast3
+      GOOGLE_APPLICATION_CREDENTIALS: /workspace/Ora/ora-automation/google-service-account.json
+      ORA_RD_GEMINI_DISABLE_VERTEX: "0"
+      GOOGLE_CLOUD_FALLBACK_LOCATIONS: us-central1,us-east1,europe-west1
+      EMBEDDING_LOCATION: asia-northeast3
+      MCP_GEMINI_MODEL: gemini-2.5-flash
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ..:/workspace/Ora
+
+  worker-pm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ora-automation-worker-pm
+    working_dir: /workspace/Ora/ora-automation
+    command: python -m ora_automation_api.worker --agent-role pm
+    environment:
+      <<: *worker-env
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ..:/workspace/Ora
+
+  worker-researcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ora-automation-worker-researcher
+    working_dir: /workspace/Ora/ora-automation
+    command: python -m ora_automation_api.worker --agent-role researcher
+    environment:
+      <<: *worker-env
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ..:/workspace/Ora
+
+  worker-engineer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ora-automation-worker-engineer
+    working_dir: /workspace/Ora/ora-automation
+    command: python -m ora_automation_api.worker --agent-role engineer
+    environment:
+      <<: *worker-env
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ..:/workspace/Ora
+
+  worker-qa:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ora-automation-worker-qa
+    working_dir: /workspace/Ora/ora-automation
+    command: python -m ora_automation_api.worker --agent-role qa
+    environment:
+      <<: *worker-env
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ..:/workspace/Ora
+
+volumes:
+  ora_automation_pgdata:

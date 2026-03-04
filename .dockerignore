@@ -1,0 +1,12 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+node_modules
+research_reports/runs/docker
+dist
+build

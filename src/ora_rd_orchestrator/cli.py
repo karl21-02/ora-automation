@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .engine import generate_report
+from .pipeline import generate_report
 
 
 def _parse_list(values: str | None) -> list[str]:
@@ -76,6 +76,37 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Number of agent deliberation rounds before final ranking (default: 2).",
     )
     parser.add_argument(
+        "--orchestration-profile",
+        default="standard",
+        help="Orchestration profile (standard|strict).",
+    )
+    parser.add_argument(
+        "--orchestration-stages",
+        default="analysis,deliberation,execution",
+        help="Comma-separated stages (analysis,deliberation,execution).",
+    )
+    parser.add_argument(
+        "--service-scope",
+        default="",
+        help="Comma-separated service scope (b2b,b2b-android,b2c,ai,telecom,docs).",
+    )
+    parser.add_argument(
+        "--feature-scope",
+        default="",
+        help="Comma-separated feature scope labels.",
+    )
+    parser.add_argument(
+        "--llm-deliberation-cmd",
+        default=None,
+        help="External command for LLM deliberation rounds (JSON in/out).",
+    )
+    parser.add_argument(
+        "--llm-deliberation-timeout",
+        type=float,
+        default=8.0,
+        help="LLM deliberation command timeout seconds.",
+    )
+    parser.add_argument(
         "--llm-consensus-cmd",
         default=None,
         help="External command to run LLM-assisted consensus (JSON in, JSON out).",
@@ -91,6 +122,51 @@ def _build_parser() -> argparse.ArgumentParser:
         nargs="*",
         default=[],
         help="Optional markdown files containing past research reports (V7, V8, V9...).",
+    )
+    parser.add_argument(
+        "--agent-mode",
+        default="flat",
+        choices=["flat", "hierarchical"],
+        help="Agent mode: flat (default, 7-agent) or hierarchical (4-tier, 14-agent).",
+    )
+    parser.add_argument(
+        "--tier3-debate-rounds",
+        type=int,
+        default=2,
+        help="Number of Tier 3 cross-domain debate rounds in hierarchical mode (default: 2).",
+    )
+    parser.add_argument(
+        "--qa-gate-threshold",
+        type=float,
+        default=3.5,
+        help="QA gate threshold for hierarchical mode (default: 3.5).",
+    )
+    parser.add_argument(
+        "--subordinate-blend",
+        type=float,
+        default=0.60,
+        help="Tier 2 subordinate blend ratio (default: 0.60).",
+    )
+    parser.add_argument(
+        "--persona-dir",
+        default=None,
+        help="Directory containing persona YAML files (default: built-in personas/).",
+    )
+    parser.add_argument(
+        "--llm-topic-discovery-cmd",
+        default=None,
+        help="External command for LLM-driven topic discovery (JSON in/out).",
+    )
+    parser.add_argument(
+        "--llm-scoring-cmd",
+        default=None,
+        help="External command for LLM-driven agent scoring (JSON in/out).",
+    )
+    parser.add_argument(
+        "--llm-scoring-timeout",
+        type=float,
+        default=10.0,
+        help="LLM scoring command timeout seconds (default: 10.0).",
     )
     return parser
 
@@ -114,12 +190,27 @@ def main(argv: list[str] | None = None) -> int:
         report_focus=(args.focus.strip() if args.focus else ""),
         version_tag=args.version_tag.strip() if args.version_tag else "V10",
         debate_rounds=max(0, args.debate_rounds),
+        orchestration_profile=args.orchestration_profile.strip().lower() if args.orchestration_profile else "standard",
+        orchestration_stages=_parse_list(args.orchestration_stages),
+        service_scope=_parse_list(args.service_scope),
+        feature_scope=_parse_list(args.feature_scope),
+        llm_deliberation_cmd=args.llm_deliberation_cmd.strip() if args.llm_deliberation_cmd else None,
+        llm_deliberation_timeout=max(1.0, args.llm_deliberation_timeout),
         llm_consensus_cmd=args.llm_consensus_cmd.strip() if args.llm_consensus_cmd else None,
         llm_consensus_timeout=max(1.0, args.llm_consensus_timeout),
+        agent_mode=args.agent_mode.strip().lower() if args.agent_mode else "flat",
+        tier3_debate_rounds=max(0, args.tier3_debate_rounds),
+        qa_gate_threshold=max(0.0, args.qa_gate_threshold),
+        subordinate_blend=max(0.0, min(1.0, args.subordinate_blend)),
+        persona_dir=args.persona_dir.strip() if args.persona_dir else None,
+        llm_topic_discovery_cmd=args.llm_topic_discovery_cmd.strip() if args.llm_topic_discovery_cmd else None,
+        llm_scoring_cmd=args.llm_scoring_cmd.strip() if args.llm_scoring_cmd else None,
+        llm_scoring_timeout=max(1.0, args.llm_scoring_timeout),
     )
 
     print(f"[done] markdown: {result['markdown_path']}")
     print(f"[done] json: {result['json_path']}")
+    print(f"[summary] agent-mode: {result.get('agent_mode', 'flat')}")
     print(
         "[summary] final-topics: "
         + ", ".join(item["topic_name"] for item in result["top_topics"])
@@ -128,22 +219,34 @@ def main(argv: list[str] | None = None) -> int:
         f"[summary] debate-rounds: requested {max(0, args.debate_rounds)} / "
         f"executed {result.get('debate_rounds_executed', 0)}"
     )
+    orchestration = result.get("orchestration", {})
     print(
-        "[summary] consensus-method: "
-        + str(result.get("consensus_summary", {}).get("method", "rule-only"))
+        "[summary] orchestration: "
+        + f"profile={orchestration.get('profile', args.orchestration_profile)} "
+        + f"stages={','.join(orchestration.get('stages', _parse_list(args.orchestration_stages)))}"
     )
+    if result.get("agent_mode") == "hierarchical":
+        h_analysis = result.get("hierarchical_analysis", {})
+        t2_flags = h_analysis.get("tier2", {}).get("flags", {})
+        flagged = sum(1 for v in t2_flags.values() if v)
+        print(f"[summary] hierarchical: tier3-rounds={args.tier3_debate_rounds} qa-flagged={flagged}")
+    else:
+        print(
+            "[summary] consensus-method: "
+            + str(result.get("consensus_summary", {}).get("method", "llm-only"))
+        )
 
-    topic_by_id = {
-        item["topic_id"]: item["topic_name"]
-        for item in result["top_topics"]
-    }
-    consensus_topic_names = [
-        topic_by_id.get(topic_id, topic_id) for topic_id in result.get("consensus", [])
-    ]
-    print(
-        "[summary] consensus: "
-        + ", ".join(consensus_topic_names[:3])
-    )
+        topic_by_id = {
+            item["topic_id"]: item["topic_name"]
+            for item in result["top_topics"]
+        }
+        consensus_topic_names = [
+            topic_by_id.get(topic_id, topic_id) for topic_id in result.get("consensus", [])
+        ]
+        print(
+            "[summary] consensus: "
+            + ", ".join(consensus_topic_names[:3])
+        )
     print(
         "[summary] agent-rankings: "
         + ", ".join(

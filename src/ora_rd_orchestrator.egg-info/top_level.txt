@@ -1,0 +1,2 @@
+ora_automation_api
+ora_rd_orchestrator
