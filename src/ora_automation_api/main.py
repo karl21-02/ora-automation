@@ -4,9 +4,11 @@ import argparse
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from .chat_router import router as chat_router
 from .config import settings
 from .database import Base, engine, get_db
 from .llm_planner import PlannerError, run_llm_planner
@@ -40,6 +42,16 @@ app = FastAPI(
     version="0.2.0",
     description="FastAPI + Postgres + RabbitMQ orchestration backend for ora-automation",
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(chat_router)
 
 
 def _run_ddl_migrations() -> None:

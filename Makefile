@@ -1,4 +1,4 @@
-.PHONY: help setup run run-direct run-direct-single run-deep run-focus run-focus-deep run-single run-focus-single run-cycle run-cycle-deep run-cycle-verify run-loop run-loop-deep verify-sources e2e-install e2e-open e2e-run e2e-playwright-install e2e-service e2e-service-all e2e-service-list qa-program qa-program-loop qa-report-latest api-up api-down api-reset api-logs api-ps api-health docker-build docker-run docker-run-cycle docker-run-loop clean
+.PHONY: help setup run run-direct run-direct-single run-deep run-focus run-focus-deep run-single run-focus-single run-cycle run-cycle-deep run-cycle-verify run-loop run-loop-deep verify-sources e2e-install e2e-open e2e-run e2e-playwright-install e2e-service e2e-service-all e2e-service-list qa-program qa-program-loop qa-report-latest api-up api-down api-reset api-logs api-ps api-health docker-build docker-run docker-run-cycle docker-run-loop clean frontend-install frontend-dev frontend-build
 
 PYTHON ?= python3
 TOP ?= 6
@@ -528,3 +528,12 @@ qa-report-latest:
 		exit 1; \
 	fi; \
 	echo "$$latest"
+
+frontend-install:
+	cd frontend && npm install
+
+frontend-dev:
+	cd frontend && npm run dev
+
+frontend-build:
+	cd frontend && npm run build

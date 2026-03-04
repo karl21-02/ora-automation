@@ -47,6 +47,14 @@ services:
       ORA_AUTOMATION_ROOT: /workspace/Ora/ora-automation
       ORA_AUTOMATION_RUN_OUTPUT: /workspace/Ora/ora-automation/research_reports/api_runs
       PYTHONUNBUFFERED: "1"
+      # Gemini (for chat endpoint)
+      ORA_RD_LLM_PROVIDER: gemini
+      GEMINI_MODEL: gemini-2.5-flash
+      GOOGLE_CLOUD_PROJECT_ID: ora-project-474413
+      GOOGLE_CLOUD_LOCATION: asia-northeast3
+      GOOGLE_APPLICATION_CREDENTIALS: /workspace/Ora/ora-automation/google-service-account.json
+      ORA_RD_GEMINI_DISABLE_VERTEX: "0"
+      GOOGLE_CLOUD_FALLBACK_LOCATIONS: us-central1,us-east1,europe-west1
     ports:
       - "8000:8000"
     depends_on:
@@ -56,6 +64,16 @@ services:
         condition: service_healthy
     volumes:
       - ..:/workspace/Ora
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ora-automation-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
 
   worker-ceo:
     build:

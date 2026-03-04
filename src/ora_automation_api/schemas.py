@@ -129,3 +129,73 @@ class LlmPlanRunRequest(BaseModel):
     dry_run: bool = False
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
     env_overrides: dict[str, str] = Field(default_factory=dict)
+
+
+# ── Chat (chatbot frontend) ──────────────────────────────────────────
+
+
+class ChatMessage(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., min_length=1, max_length=8000)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+    conversation_id: str | None = None
+    history: list[ChatMessage] = Field(default_factory=list)
+
+
+class ChatPlan(BaseModel):
+    target: str
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    plan: ChatPlan | None = None
+    run_id: str | None = None
+
+
+class ReportListItem(BaseModel):
+    filename: str
+    created_at: datetime
+    size_bytes: int
+    report_type: str  # "markdown" | "json"
+
+
+# ── Conversations (DB-backed) ────────────────────────────────────────
+
+
+class ChatMessageRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    conversation_id: str
+    role: str
+    content: str
+    plan: dict | None = None
+    run_id: str | None = None
+    created_at: datetime
+
+
+class ConversationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationDetail(ConversationRead):
+    messages: list[ChatMessageRead] = Field(default_factory=list)
+
+
+class ConversationCreate(BaseModel):
+    id: str | None = None
+    title: str = ""
+
+
+class ConversationList(BaseModel):
+    items: list[ConversationRead]
+    total: int
