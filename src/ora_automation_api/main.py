@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .chat_router import router as chat_router
 from .config import settings
-from .database import Base, engine, get_db
+from .database import Base, SessionLocal, engine, get_db
 from .llm_planner import PlannerError, run_llm_planner
 from .queue import pick_agent_role, publish_run
 from .schemas import (
@@ -53,7 +53,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from .notion_router import router as notion_router
+from .scheduler_router import router as scheduler_router
+
 app.include_router(chat_router)
+app.include_router(notion_router)
+app.include_router(scheduler_router)
 
 
 def _run_ddl_migrations() -> None:
@@ -77,6 +82,37 @@ def _run_ddl_migrations() -> None:
         "ALTER TABLE orchestration_runs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
         "ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS dialog_context JSONB",
         "ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS dialog_context_version INTEGER NOT NULL DEFAULT 0",
+        # Notion sync state
+        """CREATE TABLE IF NOT EXISTS notion_sync_state (
+            id SERIAL PRIMARY KEY,
+            entity_type VARCHAR(32) NOT NULL,
+            entity_key VARCHAR(256) NOT NULL,
+            notion_page_id VARCHAR(36) NOT NULL,
+            notion_url TEXT,
+            source_report_path TEXT,
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(entity_type, entity_key)
+        )""",
+        # Scheduled jobs
+        """CREATE TABLE IF NOT EXISTS scheduled_jobs (
+            id VARCHAR(36) PRIMARY KEY,
+            name VARCHAR(128) NOT NULL UNIQUE,
+            description TEXT,
+            target VARCHAR(64) NOT NULL DEFAULT 'run-cycle',
+            env JSONB NOT NULL DEFAULT '{}'::jsonb,
+            interval_minutes INTEGER,
+            cron_expression VARCHAR(128),
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            auto_publish_notion BOOLEAN NOT NULL DEFAULT FALSE,
+            last_run_at TIMESTAMPTZ,
+            last_run_status VARCHAR(32),
+            last_run_id VARCHAR(36),
+            next_run_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
     ]
     with engine.begin() as conn:
         for stmt in statements:
@@ -88,6 +124,17 @@ def startup() -> None:
     Base.metadata.create_all(bind=engine)
     _run_ddl_migrations()
     settings.run_output_dir.mkdir(parents=True, exist_ok=True)
+
+    if settings.scheduler_enabled:
+        from .scheduler import OraScheduler
+        app.state.scheduler = OraScheduler(SessionLocal)
+        app.state.scheduler.start()
+
+
+@app.on_event("shutdown")
+def shutdown() -> None:
+    if hasattr(app.state, "scheduler"):
+        app.state.scheduler.stop()
 
 
 @app.get("/health")
