@@ -71,3 +71,123 @@ body {
   background-color: #f9fafb;
   font-weight: 600;
 }
+
+/* ── Sidebar ────────────────────────────────────────────────────── */
+
+.sidebar-conv-item {
+  padding: 8px 12px;
+  margin: 0 8px 2px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: background-color 0.15s ease;
+  position: relative;
+}
+
+.sidebar-conv-item:hover {
+  background-color: #f3f4f6;
+}
+
+.sidebar-conv-item.active {
+  background-color: #e5e7eb;
+}
+
+.sidebar-conv-item .conv-actions {
+  display: none;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.sidebar-conv-item:hover .conv-actions {
+  display: flex;
+}
+
+.conv-actions button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1;
+}
+
+.conv-actions button:hover {
+  background-color: #e5e7eb;
+  color: #1f2937;
+}
+
+.sidebar-section-label {
+  padding: 12px 12px 4px 20px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sidebar-search-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+  background: #fff;
+  color: #1f2937;
+  transition: border-color 0.15s;
+}
+
+.sidebar-search-input:focus {
+  border-color: #a5b4fc;
+}
+
+.sidebar-search-input::placeholder {
+  color: #9ca3af;
+}
+
+.sidebar-delete-confirm {
+  padding: 6px 12px 8px;
+  margin: 0 8px 2px;
+  background-color: #fef2f2;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #991b1b;
+}
+
+.sidebar-delete-confirm button {
+  border: none;
+  cursor: pointer;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-right: 6px;
+}
+
+.sidebar-delete-confirm .btn-delete {
+  background-color: #dc2626;
+  color: #fff;
+}
+
+.sidebar-delete-confirm .btn-delete:hover {
+  background-color: #b91c1c;
+}
+
+.sidebar-delete-confirm .btn-cancel {
+  background-color: #e5e7eb;
+  color: #374151;
+}
+
+.sidebar-delete-confirm .btn-cancel:hover {
+  background-color: #d1d5db;
+}

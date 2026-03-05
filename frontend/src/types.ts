@@ -1,11 +1,29 @@
 export interface ChatPlan {
   target: string
   env: Record<string, string>
+  label?: string
+}
+
+export interface ChatChoice {
+  label: string
+  description: string
+  value: string
+}
+
+export interface ProjectInfo {
+  name: string
+  path: string
+  has_makefile: boolean
+  has_dockerfile: boolean
+  description: string
 }
 
 export interface ChatResponse {
   reply: string
   plan: ChatPlan | null
+  plans: ChatPlan[] | null
+  choices: ChatChoice[] | null
+  project_select: ProjectInfo[] | null
   run_id: string | null
 }
 
@@ -51,6 +69,9 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   plan?: ChatPlan | null
+  plans?: ChatPlan[] | null
+  choices?: ChatChoice[] | null
+  projectSelect?: ProjectInfo[] | null
   runId?: string | null
   timestamp: Date
 }

@@ -34,7 +34,7 @@ services:
       dockerfile: Dockerfile
     container_name: ora-automation-api
     working_dir: /workspace/Ora/ora-automation
-    command: uvicorn ora_automation_api.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn ora_automation_api.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src
     environment:
       DATABASE_URL: postgresql+psycopg://ora:ora@db:5432/ora_automation
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
@@ -46,6 +46,7 @@ services:
       ORA_AUTOMATION_LLM_PLANNER_TIMEOUT_SECONDS: ${ORA_AUTOMATION_LLM_PLANNER_TIMEOUT_SECONDS:-30}
       ORA_AUTOMATION_ROOT: /workspace/Ora/ora-automation
       ORA_AUTOMATION_RUN_OUTPUT: /workspace/Ora/ora-automation/research_reports/api_runs
+      ORA_PROJECTS_ROOT: /workspace/Ora
       PYTHONUNBUFFERED: "1"
       # Gemini (for chat endpoint)
       ORA_RD_LLM_PROVIDER: gemini

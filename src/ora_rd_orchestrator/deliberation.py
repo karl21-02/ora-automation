@@ -214,19 +214,24 @@ def llm_deliberation_round(
             for item in ranked[:min(8, len(ranked))]
             if item["topic_id"] in states
         ],
-        "score_matrix": working_scores,
+        "score_matrix": {
+            tid: working_scores[tid]
+            for item in ranked[:min(8, len(ranked))]
+            if (tid := item["topic_id"]) in working_scores
+        },
         "topic_states": {
-            topic_id: {
-                "features": state.compute_features(),
-                "keyword_hits": state.keyword_hits,
-                "business_hits": state.business_hits,
-                "novelty_hits": state.novelty_hits,
-                "code_hits": state.code_hits,
-                "doc_hits": state.doc_hits,
-                "history_hits": state.history_hits,
-                "projects": sorted(state.project_hits.keys()),
+            tid: {
+                "features": states[tid].compute_features(),
+                "keyword_hits": states[tid].keyword_hits,
+                "business_hits": states[tid].business_hits,
+                "novelty_hits": states[tid].novelty_hits,
+                "code_hits": states[tid].code_hits,
+                "doc_hits": states[tid].doc_hits,
+                "history_hits": states[tid].history_hits,
+                "projects": sorted(states[tid].project_hits.keys()),
             }
-            for topic_id, state in states.items()
+            for item in ranked[:min(8, len(ranked))]
+            if (tid := item["topic_id"]) in states
         },
         "previous_decisions": previous_decisions or [],
         "previous_discussion": previous_discussion or [],
@@ -274,11 +279,13 @@ def llm_deliberation_round(
     # Parse decisions
     decision_items = response.get("decisions")
     if isinstance(decision_items, list):
+        _seen_decision_topics: set[str] = set()
         for item in decision_items:
             if not isinstance(item, dict):
                 continue
             parsed = parse_llm_decision_record(item, states, service_scope, _agent_ids)
-            if parsed.topic_id not in [r.topic_id for r in parsed_decisions]:
+            if parsed.topic_id not in _seen_decision_topics:
+                _seen_decision_topics.add(parsed.topic_id)
                 parsed_decisions.append(parsed)
 
     if isinstance(response.get("action_log"), list):

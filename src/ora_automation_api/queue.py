@@ -96,7 +96,14 @@ def dlq_name_for_role(role: AgentRole) -> str:
     return f"{settings.rabbitmq_queue_prefix}.{role}.dlq"
 
 
-def _declare_topology(channel: pika.adapters.blocking_connection.BlockingChannel) -> None:
+_topology_declared: bool = False
+
+
+def _declare_topology(channel: pika.adapters.blocking_connection.BlockingChannel, force: bool = False) -> None:
+    global _topology_declared
+    if _topology_declared and not force:
+        return
+
     channel.exchange_declare(
         exchange=settings.rabbitmq_exchange,
         exchange_type="direct",
@@ -147,28 +154,46 @@ def _declare_topology(channel: pika.adapters.blocking_connection.BlockingChannel
             routing_key=_dead_routing_key_for_role(role_key),
         )
 
+    _topology_declared = True
+
+
+# Persistent publish connection (reused across publishes)
+_publish_conn: pika.BlockingConnection | None = None
+
+
+def _get_publish_channel() -> pika.adapters.blocking_connection.BlockingChannel:
+    """Return a channel from a persistent connection, reconnecting if needed."""
+    global _publish_conn
+    if _publish_conn is None or not _publish_conn.is_open:
+        _publish_conn = pika.BlockingConnection(pika.URLParameters(settings.rabbitmq_url))
+    return _publish_conn.channel()
+
 
 def _with_channel_publish(
     publisher,
     retries: int = 3,
     retry_delay: float = 1.0,
 ) -> None:
+    global _publish_conn, _topology_declared
     last_error: Exception | None = None
     for attempt in range(max(1, retries)):
-        conn: pika.BlockingConnection | None = None
         try:
-            conn = pika.BlockingConnection(pika.URLParameters(settings.rabbitmq_url))
-            channel = conn.channel()
+            channel = _get_publish_channel()
             _declare_topology(channel)
             publisher(channel)
             return
         except Exception as exc:  # pragma: no cover
             last_error = exc
+            # Force reconnection and topology redeclaration on next attempt
+            _topology_declared = False
+            if _publish_conn is not None:
+                try:
+                    _publish_conn.close()
+                except Exception:
+                    pass
+                _publish_conn = None
             if attempt + 1 < max(1, retries):
                 time.sleep(max(0.1, retry_delay))
-        finally:
-            if conn and conn.is_open:
-                conn.close()
     raise RuntimeError(f"rabbitmq publish failed: {last_error}")  # pragma: no cover
 
 

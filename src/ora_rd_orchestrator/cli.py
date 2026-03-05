@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from .pipeline import generate_report
+from .types import CheckpointCallback, CheckpointData, CheckpointResponse
 
 
 def _parse_list(values: str | None) -> list[str]:
@@ -126,8 +128,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--agent-mode",
         default="flat",
-        choices=["flat", "hierarchical"],
-        help="Agent mode: flat (default, 7-agent) or hierarchical (4-tier, 14-agent).",
+        choices=["flat", "hierarchical", "react"],
+        help="Agent mode: flat (default, 7-agent), hierarchical (4-tier, 14-agent), or react (autonomous ReAct agent).",
     )
     parser.add_argument(
         "--tier3-debate-rounds",
@@ -168,7 +170,39 @@ def _build_parser() -> argparse.ArgumentParser:
         default=10.0,
         help="LLM scoring command timeout seconds (default: 10.0).",
     )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Enable interactive checkpoints — pause after topic discovery and deliberation for user approval.",
+    )
     return parser
+
+
+def _cli_checkpoint(data: CheckpointData) -> CheckpointResponse:
+    """Interactive checkpoint for CLI: prints summary and asks for approval."""
+    print(f"\n{'='*60}")
+    print(f"[checkpoint] {data.stage}")
+    print(f"{'='*60}")
+    print(data.message)
+    if data.items:
+        for item in data.items:
+            label = item.get("topic_name") or item.get("topic_id", "?")
+            extra = ""
+            if "confidence" in item:
+                extra += f" (confidence={item['confidence']:.2f})"
+            if "total_score" in item:
+                extra += f" (score={item['total_score']})"
+            if "rank" in item:
+                extra = f" #{item['rank']}" + extra
+            print(f"  - {label}{extra}")
+    print()
+    try:
+        answer = input("[checkpoint] 진행할까요? (y/n, default=y): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return CheckpointResponse(approved=False, feedback="EOF/Interrupt")
+    if answer in ("n", "no"):
+        return CheckpointResponse(approved=False, feedback="사용자가 CLI에서 거부")
+    return CheckpointResponse(approved=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -177,6 +211,24 @@ def main(argv: list[str] | None = None) -> int:
 
     output_dir = Path(args.output_dir).expanduser().resolve()
     workspace = Path(args.workspace).expanduser().resolve()
+
+    # --- ReAct agent mode ---
+    if (args.agent_mode or "flat").strip().lower() == "react":
+        from .agent import run_agent_loop
+
+        result = run_agent_loop(
+            user_message=args.focus or "R&D 분석을 수행해주세요",
+            workspace_path=str(workspace),
+            top_k=max(1, args.top),
+            report_focus=args.focus.strip() if args.focus else "",
+            service_scope=_parse_list(args.service_scope),
+            output_dir=str(output_dir),
+            output_name=args.output_name,
+            persona_dir=args.persona_dir.strip() if args.persona_dir else None,
+        )
+        print(f"[agent] {result['response'][:500]}")
+        print(f"[agent] stop_reason={result['stop_reason']}, iterations={result['iterations']}")
+        return 0
 
     result = generate_report(
         workspace=workspace,
@@ -206,7 +258,12 @@ def main(argv: list[str] | None = None) -> int:
         llm_topic_discovery_cmd=args.llm_topic_discovery_cmd.strip() if args.llm_topic_discovery_cmd else None,
         llm_scoring_cmd=args.llm_scoring_cmd.strip() if args.llm_scoring_cmd else None,
         llm_scoring_timeout=max(1.0, args.llm_scoring_timeout),
+        checkpoint=_cli_checkpoint if args.interactive else None,
     )
+
+    if result.get("status") == "cancelled":
+        print(f"[cancelled] stage={result.get('stage', '?')}: {result.get('message', '')}")
+        return 0
 
     print(f"[done] markdown: {result['markdown_path']}")
     print(f"[done] json: {result['json_path']}")

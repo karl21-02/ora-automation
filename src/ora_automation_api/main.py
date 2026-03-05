@@ -14,6 +14,8 @@ from .database import Base, engine, get_db
 from .llm_planner import PlannerError, run_llm_planner
 from .queue import pick_agent_role, publish_run
 from .schemas import (
+    BatchRunCreate,
+    BatchRunResponse,
     DecisionRead,
     DecisionCreate,
     LlmPlanRequest,
@@ -121,6 +123,36 @@ def create_orchestration_run(
             db.refresh(run)
             raise HTTPException(status_code=503, detail="failed to enqueue orchestration run")
     return OrchestrationRunRead.model_validate(run)
+
+
+@app.post("/api/v1/orchestrations/batch", response_model=BatchRunResponse, status_code=202)
+def create_batch_runs(
+    payload: BatchRunCreate,
+    db: Session = Depends(get_db),
+) -> BatchRunResponse:
+    runs = []
+    for plan in payload.plans:
+        run_payload = OrchestrationRunCreate(
+            user_prompt=payload.user_prompt,
+            target=plan.target,
+            env=plan.env,
+        )
+        run, created = create_run(db, run_payload)
+        if run.status != "dry-run" and created:
+            try:
+                role = pick_agent_role(run.target, run.agent_role)
+                publish_run(run.id, role=role, target=run.target)
+            except Exception as exc:
+                run.status = "error"
+                run.fail_label = "STOP"
+                run.exit_code = -1
+                run.error_message = f"queue enqueue failed: {exc}"
+                run.finished_at = datetime.utcnow()
+                db.add(run)
+                db.commit()
+                db.refresh(run)
+        runs.append(OrchestrationRunRead.model_validate(run))
+    return BatchRunResponse(runs=runs)
 
 
 @app.post("/api/v1/plan", response_model=LlmPlanResponse)

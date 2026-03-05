@@ -5,6 +5,14 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ProjectInfo(BaseModel):
+    name: str
+    path: str
+    has_makefile: bool = False
+    has_dockerfile: bool = False
+    description: str = ""
+
+
 class DecisionCreate(BaseModel):
     decision_id: str | None = None
     owner: str = Field(..., min_length=1, max_length=64)
@@ -148,12 +156,31 @@ class ChatRequest(BaseModel):
 class ChatPlan(BaseModel):
     target: str
     env: dict[str, str] = Field(default_factory=dict)
+    label: str = ""
+
+
+class ChatChoice(BaseModel):
+    label: str
+    description: str = ""
+    value: str
 
 
 class ChatResponse(BaseModel):
     reply: str
     plan: ChatPlan | None = None
+    plans: list[ChatPlan] | None = None
+    choices: list[ChatChoice] | None = None
+    project_select: list[ProjectInfo] | None = None
     run_id: str | None = None
+
+
+class BatchRunCreate(BaseModel):
+    user_prompt: str = Field(..., min_length=1, max_length=4000)
+    plans: list[ChatPlan]
+
+
+class BatchRunResponse(BaseModel):
+    runs: list[OrchestrationRunRead]
 
 
 class ReportListItem(BaseModel):

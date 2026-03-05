@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from difflib import SequenceMatcher
 from typing import Any
 
 from .config import (
@@ -25,8 +26,14 @@ def _build_llm_consensus_payload(
     discussion: list[dict] | None,
     top_k: int,
     agent_definitions: dict[str, dict[str, Any]] | None = None,
+    deliberation_risk_summary: list[dict] | None = None,
 ) -> dict:
     _defs = agent_definitions or {}
+    # Pre-build rank index: O(A*R) once instead of O(top_k*A*R) with list.index()
+    _rank_index: dict[str, dict[str, int]] = {
+        agent: {tid: idx + 1 for idx, tid in enumerate(ranks)}
+        for agent, ranks in agent_rankings.items()
+    }
     return {
         "version": "llm-consensus-v2",
         "top_k": top_k,
@@ -54,16 +61,15 @@ def _build_llm_consensus_payload(
                 "feature": item.get("features", {}),
                 "agent_signals": {
                     "agent_rankings": {
-                        agent: ranks.index(item["topic_id"]) + 1
-                        if item["topic_id"] in ranks
-                        else None
-                        for agent, ranks in agent_rankings.items()
+                        agent: _rank_index[agent].get(item["topic_id"])
+                        for agent in agent_rankings
                     }
                 },
             }
             for item in ranked[:top_k]
             if item["topic_id"] in states
         ],
+        "deliberation_risk_summary": deliberation_risk_summary or [],
         "meta": {
             "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
             "topic_count": len(ranked),
@@ -81,12 +87,14 @@ def apply_hybrid_consensus(
     command: str | None = None,
     timeout: float = LLM_CONSENSUS_TIMEOUT_SECONDS,
     agent_definitions: dict[str, dict[str, Any]] | None = None,
+    deliberation_risk_summary: list[dict] | None = None,
 ) -> dict:
     """Apply LLM-based consensus. No hardcoded gates."""
     target_size = min(top_k, len(ranked))
     payload = _build_llm_consensus_payload(
         ranked, states, agent_rankings, discussion, target_size,
         agent_definitions=agent_definitions,
+        deliberation_risk_summary=deliberation_risk_summary,
     )
 
     result = run_llm_command(
@@ -115,16 +123,44 @@ def apply_hybrid_consensus(
 
     llm_result = result.parsed
     candidate = llm_result.get("final_consensus", llm_result.get("consensus", []))
+
+    # Build fuzzy matching index for topic IDs
+    _valid_ids = set(states.keys())
+    _norm_to_id: dict[str, str] = {}
+    for tid in _valid_ids:
+        _norm_to_id[tid.lower().replace("-", "_").replace(" ", "_")] = tid
+
+    def _resolve_topic_id(raw_id: str) -> str | None:
+        """Resolve a topic ID with exact match first, then normalized, then fuzzy."""
+        if raw_id in _valid_ids:
+            return raw_id
+        normed = raw_id.lower().replace("-", "_").replace(" ", "_")
+        if normed in _norm_to_id:
+            return _norm_to_id[normed]
+        # Fuzzy match as last resort (threshold 0.8)
+        best_match, best_score = "", 0.0
+        for norm_key, real_id in _norm_to_id.items():
+            score = SequenceMatcher(None, normed, norm_key).ratio()
+            if score > best_score:
+                best_score = score
+                best_match = real_id
+        if best_score >= 0.8:
+            logger.info("Fuzzy-matched consensus topic ID '%s' → '%s' (%.2f)", raw_id, best_match, best_score)
+            return best_match
+        return None
+
     final_consensus: list[str] = []
     if isinstance(candidate, list):
         for topic_id in candidate:
             if not isinstance(topic_id, str):
                 continue
-            if topic_id in final_consensus:
+            resolved = _resolve_topic_id(topic_id)
+            if resolved is None:
+                logger.warning("Consensus topic ID '%s' not found (no fuzzy match)", topic_id)
                 continue
-            if topic_id not in states:
+            if resolved in final_consensus:
                 continue
-            final_consensus.append(topic_id)
+            final_consensus.append(resolved)
             if len(final_consensus) >= target_size:
                 break
 

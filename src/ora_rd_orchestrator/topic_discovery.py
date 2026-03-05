@@ -155,6 +155,12 @@ _TOPIC_DISCOVERY_SYSTEM_PROMPT = """\
 - 도메인: {domain}
 - 각 토픽에 10~20개의 키워드를 포함 (한국어/영어 혼용 가능)
 - confidence는 워크스페이스 증거 기반 (코드/문서에 증거 많을수록 높음)
+
+## 근거 기반 규칙 (CRITICAL)
+- 모든 토픽은 제공된 workspace_summary (코드 스니펫, README, 프로젝트 구조) 또는 history_context에서 근거를 찾을 수 있어야 합니다
+- 워크스페이스에 근거가 없는 토픽은 confidence를 0.3 이하로 설정하세요
+- rationale에 반드시 근거 출처를 명시하세요 (예: "프로젝트 OraAIServer의 코드 스니펫에서 embedding 관련 코드 확인")
+- 제공된 데이터에 없는 프로젝트명이나 파일명을 만들어내지 마세요
 """
 
 
@@ -270,8 +276,15 @@ def _load_seed_json(seed_path: Path) -> list[TopicDiscovery]:
 # Legacy fallback
 # ---------------------------------------------------------------------------
 
-def _legacy_topics_as_discoveries() -> list[TopicDiscovery]:
-    """Convert built-in LEGACY_TOPICS to TopicDiscovery list."""
+def _legacy_topics_as_discoveries(domain: str = "voice AI") -> list[TopicDiscovery]:
+    """Convert built-in LEGACY_TOPICS to TopicDiscovery list.
+
+    When the requested *domain* differs from the built-in "voice AI" focus,
+    lower the confidence so downstream ranking prefers LLM-discovered topics
+    when they become available.
+    """
+    is_default_domain = domain.strip().lower() in ("voice ai", "voice", "")
+    base_confidence = 0.7 if is_default_domain else 0.3
     discoveries: list[TopicDiscovery] = []
     for topic_id, details in LEGACY_TOPICS.items():
         discoveries.append(TopicDiscovery(
@@ -281,7 +294,7 @@ def _legacy_topics_as_discoveries() -> list[TopicDiscovery]:
             suggested_keywords=details.get("keywords", []),
             search_terms={},
             rationale="legacy hardcoded fallback",
-            confidence=0.7,
+            confidence=base_confidence,
             discovered_by="legacy_fallback",
         ))
     return discoveries
@@ -352,8 +365,8 @@ def discover_topics(
             return discoveries
 
     # 3. Legacy fallback
-    logger.info("Using legacy hardcoded topics as fallback")
-    return _legacy_topics_as_discoveries()
+    logger.info("Using legacy hardcoded topics as fallback (domain=%s)", domain)
+    return _legacy_topics_as_discoveries(domain=domain)
 
 
 def topics_to_dict(discoveries: list[TopicDiscovery]) -> dict[str, dict[str, Any]]:

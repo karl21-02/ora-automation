@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +74,9 @@ from .research import build_research_queries, build_sources_file
 from .scoring import score_all_agents
 from .topic_discovery import discover_topics, topics_to_dict, topics_to_keywords
 from .types import (
+    CheckpointCallback,
+    CheckpointData,
+    CheckpointResponse,
     HierarchicalPipelineState,
     OrchestrationDecision,
     TierResult,
@@ -277,6 +281,7 @@ def generate_report(
     llm_topic_discovery_cmd: str | None = None,
     llm_scoring_cmd: str | None = None,
     llm_scoring_timeout: float = 10.0,
+    checkpoint: CheckpointCallback = None,
 ) -> dict:
     """Generate an R&D strategy report.
 
@@ -345,18 +350,22 @@ def generate_report(
     if not resolved_topic_cmd:
         resolved_topic_cmd = os.getenv(LLM_TOPIC_DISCOVERY_CMD_ENV, "").strip() or None
 
-    workspace_summary = None
-    if resolved_topic_cmd:
-        workspace_summary = collect_workspace_summary(
-            workspace=workspace,
-            extensions=set(extensions),
-            ignore_dirs=ignore_dirs,
-            max_files=min(max_files, 500),
-        )
+    # Always collect workspace summary — needed for dynamic topic discovery
+    workspace_summary = collect_workspace_summary(
+        workspace=workspace,
+        extensions=set(extensions),
+        ignore_dirs=ignore_dirs,
+        max_files=min(max_files, 500),
+    )
+
+    # Use report_focus as domain hint when provided (e.g. "OraB2bAndroid"),
+    # otherwise default to "voice AI"
+    discovery_domain = report_focus.strip() if report_focus and report_focus.strip() else "voice AI"
 
     discoveries = discover_topics(
         workspace_summary=workspace_summary,
         llm_command=resolved_topic_cmd,
+        domain=discovery_domain,
     )
     topics_dict = topics_to_dict(discoveries)
     topic_keywords = topics_to_keywords(discoveries)
@@ -364,6 +373,57 @@ def generate_report(
     logger.info("Discovered %d topics (source: %s)",
                 len(discoveries),
                 discoveries[0].discovered_by if discoveries else "none")
+
+    # ------------------------------------------------------------------
+    # 2.5 Interactive checkpoint: let user review discovered topics
+    # ------------------------------------------------------------------
+    if checkpoint is not None:
+        topic_items = [
+            {
+                "topic_id": td.topic_id,
+                "topic_name": td.topic_name,
+                "confidence": td.confidence,
+                "discovered_by": td.discovered_by,
+                "keywords_preview": td.suggested_keywords[:5],
+            }
+            for td in discoveries
+        ]
+        cp_data = CheckpointData(
+            stage="topic_discovery",
+            message=f"{len(discoveries)}개 토픽이 발견되었습니다. 이 토픽들로 진행할까요?",
+            items=topic_items,
+            metadata={"domain": discovery_domain},
+        )
+        cp_response = checkpoint(cp_data)
+        if not cp_response.approved:
+            return {
+                "status": "cancelled",
+                "stage": "topic_discovery",
+                "message": cp_response.feedback or "사용자가 토픽 검토 단계에서 취소했습니다.",
+                "discovered_topics": topic_items,
+            }
+        # User may have modified the topic list
+        if cp_response.modified_items is not None:
+            from .topic_discovery import _load_seed_json
+            # Rebuild discoveries from user-modified items
+            modified_discoveries = []
+            for item in cp_response.modified_items:
+                if not isinstance(item, dict):
+                    continue
+                from .types import TopicDiscovery as _TD
+                modified_discoveries.append(_TD(
+                    topic_id=item.get("topic_id", ""),
+                    topic_name=item.get("topic_name", ""),
+                    description=item.get("description", ""),
+                    suggested_keywords=item.get("suggested_keywords", item.get("keywords_preview", [])),
+                    confidence=float(item.get("confidence", 0.5)),
+                    discovered_by="user_modified",
+                ))
+            if modified_discoveries:
+                discoveries = modified_discoveries
+                topics_dict = topics_to_dict(discoveries)
+                topic_keywords = topics_to_keywords(discoveries)
+                logger.info("User modified topics: %d topics after checkpoint", len(discoveries))
 
     # ------------------------------------------------------------------
     # 3. Workspace analysis
@@ -434,13 +494,23 @@ def generate_report(
 
         queries = build_research_queries(selected, topic_keywords=topic_keywords, top_k=min(6, top_k))
         output_dir.mkdir(parents=True, exist_ok=True)
-        research_sources = build_sources_file(
+        research_sources, _search_warnings = build_sources_file(
             output_dir=output_dir,
             version_tag=version_tag,
             report_focus=report_focus,
             top_topics=selected,
             topic_keywords=topic_keywords,
         )
+        if _search_warnings:
+            stage_log.append({
+                "stage": "research_search",
+                "status": "partial",
+                "message": f"search_warnings={len(_search_warnings)} (some APIs failed)",
+                "warnings": [
+                    {"provider": w.get("provider", ""), "topic": w.get("topic", ""), "error": w.get("search_error", "")}
+                    for w in _search_warnings[:10]
+                ],
+            })
 
         # Derive tier agent sets from personas if available
         tier1_agents = registry.get_tier(1) if personas else []
@@ -491,13 +561,29 @@ def generate_report(
         h_exec_summary_raw: dict = {}
 
         if _h_report_cmd:
-            h_asis_raw = generate_asis_analysis_via_llm(
-                ranked=selected, states=states, scores=scores,
-                llm_command=_h_report_cmd, llm_timeout=_h_report_timeout,
-            )
+            # Parallel: As-Is + Feasibility (independent)
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future_h_asis = executor.submit(
+                    generate_asis_analysis_via_llm,
+                    ranked=selected, states=states, scores=scores,
+                    llm_command=_h_report_cmd, llm_timeout=_h_report_timeout,
+                )
+                future_h_feasibility = executor.submit(
+                    generate_feasibility_evidence_via_llm,
+                    ranked=selected, states=states, scores=scores,
+                    llm_command=_h_report_cmd, llm_timeout=_h_report_timeout,
+                    agent_definitions=agent_definitions, research_sources=research_sources,
+                )
+
+            h_asis_raw = future_h_asis.result()
             stage_log.append({"stage": "report_section_asis", "status": "completed" if h_asis_raw else "skipped",
                               "message": f"asis_full_text_len={len(h_asis_raw.get('full_text', ''))}"})
 
+            h_feasibility_raw = future_h_feasibility.result()
+            stage_log.append({"stage": "report_section_feasibility", "status": "completed" if h_feasibility_raw else "skipped",
+                              "message": f"feasibility_full_text_len={len(h_feasibility_raw.get('full_text', ''))}"})
+
+            # Sequential: To-Be depends on As-Is
             h_tobe_raw = generate_tobe_direction_via_llm(
                 ranked=selected, states=states,
                 llm_command=_h_report_cmd, llm_timeout=_h_report_timeout,
@@ -506,14 +592,7 @@ def generate_report(
             stage_log.append({"stage": "report_section_tobe", "status": "completed" if h_tobe_raw else "skipped",
                               "message": f"tobe_full_text_len={len(h_tobe_raw.get('full_text', ''))}"})
 
-            h_feasibility_raw = generate_feasibility_evidence_via_llm(
-                ranked=selected, states=states, scores=scores,
-                llm_command=_h_report_cmd, llm_timeout=_h_report_timeout,
-                agent_definitions=agent_definitions, research_sources=research_sources,
-            )
-            stage_log.append({"stage": "report_section_feasibility", "status": "completed" if h_feasibility_raw else "skipped",
-                              "message": f"feasibility_full_text_len={len(h_feasibility_raw.get('full_text', ''))}"})
-
+            # Sequential: Executive Summary depends on all three
             h_exec_summary_raw = generate_executive_summary_via_llm(
                 ranked=selected, states=states, scores=scores,
                 llm_command=_h_report_cmd, llm_timeout=_h_report_timeout,
@@ -574,6 +653,8 @@ def generate_report(
             asis_analysis=h_asis_raw,
             tobe_direction=h_tobe_raw,
             feasibility_evidence=h_feasibility_raw,
+            precomputed_agent_rankings=agent_rankings,
+            precomputed_research_queries=queries,
         )
         md_path.write_text(markdown, encoding="utf-8")
         js_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -608,10 +689,11 @@ def generate_report(
     if not resolved_scoring_cmd:
         resolved_scoring_cmd = os.getenv(LLM_SCORING_CMD_ENV, "").strip() or None
 
-    if not resolved_scoring_cmd:
+    from .llm_client import _get_provider
+    if not resolved_scoring_cmd and _get_provider() is None:
         raise RuntimeError(
-            "LLM scoring command is required. "
-            "Set --llm-scoring-cmd or ORA_RD_LLM_SCORING_CMD."
+            "LLM scoring requires either --llm-scoring-cmd or "
+            "GOOGLE_APPLICATION_CREDENTIALS + GOOGLE_CLOUD_PROJECT_ID."
         )
     if not personas:
         raise RuntimeError(
@@ -619,12 +701,15 @@ def generate_report(
             f"{resolved_persona_dir}"
         )
 
+    from .scoring import compute_agent_score
+
     all_agent_scores = score_all_agents(
         topic_states=states,
         personas=personas,
         agent_definitions=agent_definitions,
         llm_command=resolved_scoring_cmd,
         llm_timeout=llm_scoring_timeout,
+        agent_filter=FLAT_MODE_AGENTS,
     )
     # Convert {agent_id: {topic_id: {feature: val}}} → {topic_id: {score_agent: val}}
     scores: dict[str, dict[str, float]] = {}
@@ -633,7 +718,6 @@ def generate_report(
         for agent_id, topic_scores in all_agent_scores.items():
             if topic_id in topic_scores:
                 features = topic_scores[topic_id]
-                from .scoring import compute_agent_score
                 persona = personas.get(agent_id)
                 weights = persona.weights if persona else {}
                 per_topic[_agent_score_key(agent_id)] = compute_agent_score(features, weights)
@@ -648,10 +732,10 @@ def generate_report(
     llm_deliberation_command = llm_deliberation_cmd or os.getenv(LLM_DELIBERATION_CMD_ENV) or llm_consensus_cmd
 
     if ORCHESTRATION_STAGE_DELIBERATION in stages and effective_rounds > 0:
-        if not llm_deliberation_command:
+        if not llm_deliberation_command and _get_provider() is None:
             raise RuntimeError(
-                "LLM deliberation command is required. "
-                "Set --llm-deliberation-cmd or ORA_RD_LLM_DELIBERATION_CMD."
+                "LLM deliberation requires either --llm-deliberation-cmd or "
+                "GOOGLE_APPLICATION_CREDENTIALS + GOOGLE_CLOUD_PROJECT_ID."
             )
         stage_log.append({
             "stage": ORCHESTRATION_STAGE_DELIBERATION,
@@ -726,8 +810,42 @@ def generate_report(
     # 6. Finalize scores
     ranked = build_final_score(states, scores)
     selected = ranked[:top_k]
+
+    # ------------------------------------------------------------------
+    # 6.5 Interactive checkpoint: deliberation results review
+    # ------------------------------------------------------------------
+    if checkpoint is not None:
+        ranked_items = [
+            {
+                "topic_id": item.get("topic_id"),
+                "topic_name": item.get("topic_name"),
+                "total_score": round(item.get("total_score", 0), 2),
+                "rank": idx + 1,
+            }
+            for idx, item in enumerate(selected)
+        ]
+        cp_data = CheckpointData(
+            stage="deliberation_complete",
+            message=(
+                f"Deliberation 완료. 상위 {len(selected)}개 토픽이 선정되었습니다. "
+                f"이 결과로 리서치 + 리포트 생성을 진행할까요?"
+            ),
+            items=ranked_items,
+            metadata={
+                "debate_rounds": effective_rounds,
+                "total_decisions": len(pipeline_decisions),
+            },
+        )
+        cp_response = checkpoint(cp_data)
+        if not cp_response.approved:
+            return {
+                "status": "cancelled",
+                "stage": "deliberation_complete",
+                "message": cp_response.feedback or "사용자가 deliberation 검토 단계에서 취소했습니다.",
+                "ranked_topics": ranked_items,
+            }
+
     _phase_llm_cmd = llm_deliberation_command or resolved_scoring_cmd or llm_consensus_cmd
-    phases = build_phase_plan_via_llm(selected, top_k=top_k, llm_command=_phase_llm_cmd)
     synergy = build_synergy_graph(states, selected)
 
     agent_rankings = build_agent_rankings(
@@ -771,11 +889,25 @@ def generate_report(
     )
 
     # 7. Consensus
-    if not llm_consensus_cmd and not llm_deliberation_command:
+    if not llm_consensus_cmd and not llm_deliberation_command and _get_provider() is None:
         raise RuntimeError(
-            "LLM consensus command is required. "
-            "Set --llm-consensus-cmd or --llm-deliberation-cmd."
+            "LLM consensus requires either --llm-consensus-cmd, "
+            "--llm-deliberation-cmd, or "
+            "GOOGLE_APPLICATION_CREDENTIALS + GOOGLE_CLOUD_PROJECT_ID."
         )
+
+    # Build deliberation risk summary for consensus
+    _delib_risk_summary: list[dict] = []
+    for d in pipeline_decisions:
+        _delib_risk_summary.append({
+            "topic_id": d.topic_id,
+            "topic_name": d.topic_name,
+            "risk": d.risk,
+            "confidence": d.confidence,
+            "score_delta": d.score_delta,
+            "fail_label": d.fail_label,
+            "rationale": d.rationale[:200],
+        })
 
     consensus_summary = apply_hybrid_consensus(
         ranked=ranked,
@@ -787,6 +919,7 @@ def generate_report(
         command=llm_consensus_cmd,
         timeout=llm_consensus_timeout,
         agent_definitions=agent_definitions,
+        deliberation_risk_summary=_delib_risk_summary,
     )
 
     if consensus_summary.get("status") != "ok":
@@ -831,41 +964,70 @@ def generate_report(
     # 8. Research queries + sources
     queries = build_research_queries(selected, topic_keywords=topic_keywords, top_k=min(6, top_k))
     output_dir.mkdir(parents=True, exist_ok=True)
-    research_sources = build_sources_file(
+    research_sources, search_warnings = build_sources_file(
         output_dir=output_dir,
         version_tag=version_tag,
         report_focus=report_focus,
         top_topics=selected,
         topic_keywords=topic_keywords,
     )
+    if search_warnings:
+        stage_log.append({
+            "stage": "research_search",
+            "status": "partial",
+            "message": f"search_warnings={len(search_warnings)} (some APIs failed)",
+            "warnings": [
+                {"provider": w.get("provider", ""), "topic": w.get("topic", ""), "error": w.get("search_error", "")}
+                for w in search_warnings[:10]
+            ],
+        })
 
-    # 8.5 LLM strategy cards + QA verification
+    # 8.5 Parallel Group A+C: strategy cards + QA verification + phase plan
     llm_strategy_cmd = resolved_scoring_cmd or llm_deliberation_command or llm_consensus_cmd
-    strategy_cards = generate_strategy_cards_via_llm(
-        top_topics=selected,
-        states=states,
-        llm_command=llm_strategy_cmd,
-        llm_timeout=30.0,
-        agent_decisions=selected_decisions,
-        sources=research_sources,
-    )
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_strategy = executor.submit(
+            generate_strategy_cards_via_llm,
+            top_topics=selected,
+            states=states,
+            llm_command=llm_strategy_cmd,
+            llm_timeout=30.0,
+            agent_decisions=selected_decisions,
+            sources=research_sources,
+        )
+        future_qa = executor.submit(
+            run_qa_verification_via_llm,
+            top_topics=selected,
+            states=states,
+            scores=scores,
+            llm_command=llm_strategy_cmd,
+            llm_timeout=30.0,
+        )
+        future_phases = executor.submit(
+            build_phase_plan_via_llm,
+            selected,
+            top_k=top_k,
+            llm_command=_phase_llm_cmd,
+        )
+
+    strategy_cards = future_strategy.result()
     stage_log.append({
         "stage": "strategy_cards",
         "status": "completed",
         "message": f"llm_strategy_cards={len(strategy_cards)}",
     })
 
-    qa_verification = run_qa_verification_via_llm(
-        top_topics=selected,
-        states=states,
-        scores=scores,
-        llm_command=llm_strategy_cmd,
-        llm_timeout=30.0,
-    )
+    qa_verification = future_qa.result()
     stage_log.append({
         "stage": "qa_verification",
         "status": "completed",
         "message": f"qa_results={len(qa_verification)}",
+    })
+
+    phases = future_phases.result()
+    stage_log.append({
+        "stage": "phase_plan",
+        "status": "completed",
+        "message": f"phases={len(phases)}",
     })
 
     # 8.6 LLM report sections (As-Is → To-Be → Feasibility → Executive Summary)
@@ -883,19 +1045,45 @@ def generate_report(
     executive_summary_raw: dict = {}
 
     if llm_report_cmd:
-        asis_analysis_raw = generate_asis_analysis_via_llm(
-            ranked=selected,
-            states=states,
-            scores=scores,
-            llm_command=llm_report_cmd,
-            llm_timeout=_report_timeout,
-        )
+        # Parallel Group B: As-Is + Feasibility (independent of each other)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_asis = executor.submit(
+                generate_asis_analysis_via_llm,
+                ranked=selected,
+                states=states,
+                scores=scores,
+                llm_command=llm_report_cmd,
+                llm_timeout=_report_timeout,
+            )
+            future_feasibility = executor.submit(
+                generate_feasibility_evidence_via_llm,
+                ranked=selected,
+                states=states,
+                scores=scores,
+                llm_command=llm_report_cmd,
+                llm_timeout=_report_timeout,
+                agent_definitions=agent_definitions,
+                consensus_summary=consensus_summary,
+                strategy_cards=strategy_cards,
+                research_sources=research_sources,
+                pipeline_decisions=pipeline_decisions,
+            )
+
+        asis_analysis_raw = future_asis.result()
         stage_log.append({
             "stage": "report_section_asis",
             "status": "completed" if asis_analysis_raw else "skipped",
             "message": f"asis_full_text_len={len(asis_analysis_raw.get('full_text', ''))}",
         })
 
+        feasibility_evidence_raw = future_feasibility.result()
+        stage_log.append({
+            "stage": "report_section_feasibility",
+            "status": "completed" if feasibility_evidence_raw else "skipped",
+            "message": f"feasibility_full_text_len={len(feasibility_evidence_raw.get('full_text', ''))}",
+        })
+
+        # Sequential: To-Be depends on As-Is
         tobe_direction_raw = generate_tobe_direction_via_llm(
             ranked=selected,
             states=states,
@@ -911,24 +1099,7 @@ def generate_report(
             "message": f"tobe_full_text_len={len(tobe_direction_raw.get('full_text', ''))}",
         })
 
-        feasibility_evidence_raw = generate_feasibility_evidence_via_llm(
-            ranked=selected,
-            states=states,
-            scores=scores,
-            llm_command=llm_report_cmd,
-            llm_timeout=_report_timeout,
-            agent_definitions=agent_definitions,
-            consensus_summary=consensus_summary,
-            strategy_cards=strategy_cards,
-            research_sources=research_sources,
-            pipeline_decisions=pipeline_decisions,
-        )
-        stage_log.append({
-            "stage": "report_section_feasibility",
-            "status": "completed" if feasibility_evidence_raw else "skipped",
-            "message": f"feasibility_full_text_len={len(feasibility_evidence_raw.get('full_text', ''))}",
-        })
-
+        # Sequential: Executive Summary depends on As-Is + To-Be + Feasibility
         executive_summary_raw = generate_executive_summary_via_llm(
             ranked=selected,
             states=states,
@@ -1012,6 +1183,8 @@ def generate_report(
         asis_analysis=asis_analysis_raw,
         tobe_direction=tobe_direction_raw,
         feasibility_evidence=feasibility_evidence_raw,
+        precomputed_agent_rankings=agent_rankings,
+        precomputed_research_queries=queries,
     )
     md_path.write_text(markdown, encoding="utf-8")
     js_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

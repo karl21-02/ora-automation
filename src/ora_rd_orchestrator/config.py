@@ -52,6 +52,16 @@ SERVICE_ALIAS_MAP: dict[str, list[str]] = {
 SERVICE_SCOPE_LABELS = {service: service for service in SERVICE_ALIAS_MAP}
 SERVICE_SCOPE_DEFAULT: tuple[str, ...] = ("b2b", "b2c", "ai", "telecom", "b2b-android")
 
+# Pre-built reverse lookup: normalized alias → canonical scope name
+_ALIAS_REVERSE_MAP: dict[str, str] = {}
+for _scope, _aliases in SERVICE_ALIAS_MAP.items():
+    _scope_key = _scope.strip().lower().replace("-", "")
+    _ALIAS_REVERSE_MAP[_scope_key] = _scope
+    for _alias in _aliases:
+        _alias_key = _alias.strip().lower().replace("-", "")
+        if _alias_key:
+            _ALIAS_REVERSE_MAP[_alias_key] = _scope
+
 # ---------------------------------------------------------------------------
 # Research API URLs and defaults
 # ---------------------------------------------------------------------------
@@ -60,22 +70,36 @@ ARXIV_SEARCH_API_URL = "https://export.arxiv.org/api/query"
 ARXIV_ABS_PREFIX = "https://arxiv.org/abs/"
 ARXIV_SEARCH_PROVIDER = "arXiv API"
 ARXIV_SEARCH_TIMEOUT_SECONDS = 8.0
-ARXIV_SEARCH_DEFAULT_MAX_RESULTS = 6
+ARXIV_SEARCH_DEFAULT_MAX_RESULTS = 10
 ARXIV_SEARCH_ENABLED_ENV = "ORA_RD_RESEARCH_ARXIV_SEARCH"
 ARXIV_SEARCH_ENABLED_ENV_OLD = "ORA_RD_ARXIV_SEARCH_ENABLED"
 
 CROSSREF_SEARCH_API_URL = "https://api.crossref.org/works"
 CROSSREF_SEARCH_PROVIDER = "Crossref API"
 CROSSREF_SEARCH_TIMEOUT_SECONDS = 8.0
-CROSSREF_SEARCH_DEFAULT_MAX_RESULTS = 4
+CROSSREF_SEARCH_DEFAULT_MAX_RESULTS = 6
 CROSSREF_SEARCH_ENABLED_ENV = "ORA_RD_RESEARCH_CROSSREF_SEARCH"
 
 OPENALEX_SEARCH_API_URL = "https://api.openalex.org/works"
 OPENALEX_SEARCH_PROVIDER = "OpenAlex API"
 OPENALEX_SEARCH_TIMEOUT_SECONDS = 8.0
-OPENALEX_SEARCH_DEFAULT_MAX_RESULTS = 3
+OPENALEX_SEARCH_DEFAULT_MAX_RESULTS = 6
 OPENALEX_SEARCH_ENABLED_ENV = "ORA_RD_RESEARCH_OPENALEX_SEARCH"
 OPENALEX_SEARCH_EMAIL = "research@ora.ai"
+
+# Semantic Scholar API (free, no auth, reliable JSON)
+SEMANTIC_SCHOLAR_SEARCH_API_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
+SEMANTIC_SCHOLAR_SEARCH_PROVIDER = "Semantic Scholar API"
+SEMANTIC_SCHOLAR_SEARCH_TIMEOUT_SECONDS = 10.0
+SEMANTIC_SCHOLAR_SEARCH_DEFAULT_MAX_RESULTS = 5
+SEMANTIC_SCHOLAR_SEARCH_ENABLED_ENV = "ORA_RD_RESEARCH_SEMANTIC_SCHOLAR_SEARCH"
+
+# Web search (Google Scholar via Scrapling)
+WEB_SEARCH_ENABLED_ENV = "ORA_RD_RESEARCH_WEB_SEARCH"
+WEB_SEARCH_PROVIDER = "Google Scholar"
+WEB_SEARCH_TIMEOUT_SECONDS = 10.0
+WEB_SEARCH_DEFAULT_MAX_RESULTS = 3
+WEB_SEARCH_BASE_URL = "https://scholar.google.com/scholar"
 
 WEB_FALLBACK_SEARCH_QUERY_PREFIX = "site:arxiv.org"
 
@@ -131,6 +155,12 @@ LLM_CONSENSUS_MAX_RISK = 8.0
 # New: LLM topic discovery and scoring
 LLM_TOPIC_DISCOVERY_CMD_ENV = "ORA_RD_LLM_TOPIC_DISCOVERY_CMD"
 LLM_SCORING_CMD_ENV = "ORA_RD_LLM_SCORING_CMD"
+
+# LLM provider configuration
+LLM_PREFER_SUBPROCESS_ENV = "ORA_RD_LLM_PREFER_SUBPROCESS"
+GEMINI_MODEL_LITE_ENV = "ORA_RD_GEMINI_MODEL_LITE"
+GEMINI_MODEL_FLASH_ENV = "ORA_RD_GEMINI_MODEL_FLASH"
+GEMINI_MODEL_PRO_ENV = "ORA_RD_GEMINI_MODEL_PRO"
 
 # LLM report section generation
 LLM_REPORT_SECTION_TIMEOUT_SECONDS = 45.0
@@ -314,15 +344,7 @@ def _service_alias_to_scope(service: str) -> str:
     key = _normalize_text_token(service)
     if not key:
         return ""
-    for scope, aliases in SERVICE_ALIAS_MAP.items():
-        scope_key = _normalize_text_token(scope)
-        if key == scope_key:
-            return scope
-        alias_keys = {scope_key}
-        alias_keys.update({_normalize_text_token(token) for token in aliases})
-        if key in alias_keys:
-            return scope
-    return key
+    return _ALIAS_REVERSE_MAP.get(key, key)
 
 
 def _build_service_scope(service_scope: set[str] | list[str] | None) -> list[str]:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Iterable, List
 
@@ -13,6 +14,9 @@ from .config import (
     _service_alias_to_scope,
 )
 from .types import Evidence, TopicDiscovery, TopicState, WorkspaceSummary
+
+# Extensions that can plausibly exceed 1.2MB (auto-generated, data files, etc.)
+_LARGE_EXT = {"json", "xml", "csv", "log", "txt", "sql", "html", "js", "ts", "py", "java"}
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +52,8 @@ def _iter_files(
                 continue
             if ext not in extensions:
                 continue
-            if file_path.stat().st_size > 1_200_000:
+            # Only stat files with extensions that could plausibly exceed 1.2MB
+            if ext in _LARGE_EXT and file_path.stat().st_size > 1_200_000:
                 continue
             candidates.append(file_path)
     if not candidates:
@@ -90,14 +95,35 @@ def _infer_project_name(workspace: Path, file_path: Path) -> str:
     return relative.parts[0]
 
 
-def _matches(text: str, keys: Iterable[str]) -> list[str]:
+def _matches(text: str, keys: Iterable[str], *, pre_lowered: bool = False) -> list[str]:
+    """Match keywords with word-boundary awareness.
+
+    For ASCII-only keywords (len>=3), uses word boundary matching to avoid
+    false positives like "turn" matching "return".
+    CJK/Korean keywords use substring matching (word boundaries don't apply).
+    Short keywords (<3 chars) also use substring to avoid over-filtering.
+    """
     lowered = text.lower()
-    return [k for k in keys if k.lower() in lowered]
+    matched: list[str] = []
+    for k in keys:
+        kl = k if pre_lowered else k.lower()
+        if kl not in lowered:
+            continue
+        # For short keywords or those with non-ASCII chars, substring is fine
+        if len(kl) < 3 or not kl.isascii():
+            matched.append(k)
+        else:
+            # Word boundary check for ASCII keywords
+            if re.search(r'\b' + re.escape(kl) + r'\b', lowered):
+                matched.append(k)
+    return matched
 
 
-def _read_lines(file_path: Path) -> list[tuple[int, str]]:
+def _read_lines(file_path: Path, max_lines: int = 0) -> list[tuple[int, str]]:
     try:
         with file_path.open("r", encoding="utf-8", errors="ignore") as f:
+            if max_lines > 0:
+                return [(i + 1, line.rstrip()) for i, line in zip(range(max_lines), f)]
             return [(i + 1, line.rstrip()) for i, line in enumerate(f)]
     except OSError:
         return []
@@ -135,12 +161,16 @@ def _update_topic_hits(
 BUSINESS_WORDS = [
     "roi", "시장", "비용", "수익", "매출", "고객", "과제", "지원",
     "정부", "B2B", "과금", "투자", "수주", "규모", "서비스", "사업",
+    "SaaS", "구독", "ARR", "MRR", "PLG", "retention", "churn",
+    "경쟁", "플랫폼", "B2C", "enterprise", "pricing", "monetization",
 ]
 
 NOVELTY_WORDS = [
     "novel", "first", "new", "독자", "차별", "독보", "미존재", "처음",
     "최초", "세계", "유일", "논문", "arxiv", "interspeech", "ICASSP",
-    "ACL", "EMNLP", "NeurIPS",
+    "ACL", "EMNLP", "NeurIPS", "ICLR", "NAACL", "AAAI", "CVPR",
+    "LLM", "생성형", "GPT", "transformer", "diffusion", "multimodal",
+    "foundation model", "SOTA", "state-of-the-art", "zero-shot",
 ]
 
 
@@ -164,18 +194,24 @@ def analyze_workspace(
     new ``topic_discoveries`` list. If both are ``None`` an empty dict is
     returned.
     """
-    # Build internal topic+keyword map
+    # Build internal topic+keyword map (pre-lowercase keywords for faster matching)
     topic_map: dict[str, dict[str, list[str]]] = {}
     if topic_discoveries:
         for td in topic_discoveries:
             topic_map[td.topic_id] = {
                 "name": td.topic_name,
-                "keywords": td.suggested_keywords,
+                "keywords": [k.lower() for k in td.suggested_keywords],
             }
     elif topics:
-        topic_map = {k: {"name": v["name"], "keywords": v.get("keywords", [])} for k, v in topics.items()}
+        topic_map = {
+            k: {"name": v["name"], "keywords": [kw.lower() for kw in v.get("keywords", [])]}
+            for k, v in topics.items()
+        }
     else:
         return {}
+
+    business_words_lower = [w.lower() for w in BUSINESS_WORDS]
+    novelty_words_lower = [w.lower() for w in NOVELTY_WORDS]
 
     canonical_scopes: set[str] = set()
     for item in (service_scope or set()):
@@ -217,13 +253,13 @@ def analyze_workspace(
             lowered = line.lower()
             matched_topics: list[TopicState] = []
             for topic_id, topic in topic_map.items():
-                hits = _matches(lowered, topic["keywords"])
+                hits = _matches(lowered, topic["keywords"], pre_lowered=True)
                 if not hits:
                     continue
                 state = states[topic_id]
                 _update_topic_hits(state, ",".join(hits), project_name, is_code_file, is_history=False)
                 matched_topics.append(state)
-                if len(state.evidence) < 6:
+                if len(state.evidence) < 12:
                     state.evidence.append(
                         Evidence(
                             file=str(file_path.relative_to(workspace)),
@@ -233,8 +269,8 @@ def analyze_workspace(
                         )
                     )
             if matched_topics:
-                business_count = len(_matches(lowered, BUSINESS_WORDS))
-                novelty_count = len(_matches(lowered, NOVELTY_WORDS))
+                business_count = len(_matches(lowered, business_words_lower, pre_lowered=True))
+                novelty_count = len(_matches(lowered, novelty_words_lower, pre_lowered=True))
                 if business_count:
                     for state in matched_topics:
                         state.business_hits += business_count
@@ -251,13 +287,13 @@ def analyze_workspace(
             lowered = line.lower()
             matched_topics: list[TopicState] = []
             for topic_id, topic in topic_map.items():
-                hits = _matches(lowered, topic["keywords"])
+                hits = _matches(lowered, topic["keywords"], pre_lowered=True)
                 if not hits:
                     continue
                 state = states[topic_id]
                 _update_topic_hits(state, ",".join(hits), project_name, is_code=False, is_history=True)
                 matched_topics.append(state)
-                if len(state.evidence) < 6:
+                if len(state.evidence) < 12:
                     state.evidence.append(
                         Evidence(
                             file=f"{history_file.name}",
@@ -267,8 +303,8 @@ def analyze_workspace(
                         )
                     )
             if matched_topics:
-                business_count = len(_matches(lowered, BUSINESS_WORDS))
-                novelty_count = len(_matches(lowered, NOVELTY_WORDS))
+                business_count = len(_matches(lowered, business_words_lower, pre_lowered=True))
+                novelty_count = len(_matches(lowered, novelty_words_lower, pre_lowered=True))
                 if business_count:
                     for state in matched_topics:
                         state.business_hits += business_count
@@ -310,15 +346,15 @@ def collect_workspace_summary(
 
         # Collect README excerpts
         if fp.name.upper() in {"README.MD", "PROJECT_OVERVIEW.MD", "CLAUDE.MD"}:
-            lines = _read_lines(fp)
-            excerpt_lines = [line for _, line in lines[:30] if line.strip()]
+            lines = _read_lines(fp, max_lines=30)
+            excerpt_lines = [line for _, line in lines if line.strip()]
             if excerpt_lines:
                 readme_excerpts.append("\n".join(excerpt_lines[:15]))
 
         # Collect representative snippets (first few meaningful lines)
         if len(snippets) < 20 and fp.suffix.lower() in {".py", ".ts", ".java", ".kt", ".tsx"}:
-            lines = _read_lines(fp)
-            meaningful = [line for _, line in lines[:20] if line.strip() and not line.strip().startswith("#")]
+            lines = _read_lines(fp, max_lines=20)
+            meaningful = [line for _, line in lines if line.strip() and not line.strip().startswith("#")]
             if meaningful:
                 snippets.append({
                     "file": str(fp.relative_to(workspace)),

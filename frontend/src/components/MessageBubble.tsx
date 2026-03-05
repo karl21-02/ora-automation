@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import type { ChatPlan, Message } from '../types'
+import type { ChatChoice, ChatPlan, Message } from '../types'
+import ProjectSelectCard from './ProjectSelectCard'
 
 interface Props {
   message: Message
   onExecute?: (plan: ChatPlan) => void
+  onExecuteBatch?: (plans: ChatPlan[]) => void
   onDismissPlan?: () => void
+  onChoiceClick?: (value: string) => void
+  onProjectConfirm?: (selected: string[]) => void
   executing?: boolean
 }
 
@@ -14,13 +18,18 @@ const ALLOWED_TARGETS = [
   'run-single', 'e2e-service', 'e2e-service-all', 'verify-sources',
 ]
 
-export default function MessageBubble({ message, onExecute, onDismissPlan, executing }: Props) {
+export default function MessageBubble({ message, onExecute, onExecuteBatch, onDismissPlan, onChoiceClick, onProjectConfirm, executing }: Props) {
   const isUser = message.role === 'user'
   const [editing, setEditing] = useState(false)
   const [editTarget, setEditTarget] = useState(message.plan?.target || '')
   const [editEnv, setEditEnv] = useState(() =>
     message.plan ? Object.entries(message.plan.env).map(([k, v]) => `${k}=${v}`).join('\n') : ''
   )
+  const [selectedPlans, setSelectedPlans] = useState<Set<number>>(() => {
+    if (message.plans) return new Set(message.plans.map((_, i) => i))
+    return new Set()
+  })
+  const [choiceClicked, setChoiceClicked] = useState(false)
 
   const parseEnv = (text: string): Record<string, string> => {
     const env: Record<string, string> = {}
@@ -38,6 +47,36 @@ export default function MessageBubble({ message, onExecute, onDismissPlan, execu
     if (!onExecute) return
     onExecute({ target: editTarget, env: parseEnv(editEnv) })
     setEditing(false)
+  }
+
+  const togglePlan = (idx: number) => {
+    setSelectedPlans((prev) => {
+      const next = new Set(prev)
+      if (next.has(idx)) next.delete(idx)
+      else next.add(idx)
+      return next
+    })
+  }
+
+  const handleExecuteBatchClick = () => {
+    if (!onExecuteBatch || !message.plans) return
+    const selected = message.plans.filter((_, i) => selectedPlans.has(i))
+    if (selected.length > 0) onExecuteBatch(selected)
+  }
+
+  const handleChoiceSelect = (choice: ChatChoice) => {
+    if (choiceClicked || !onChoiceClick) return
+    setChoiceClicked(true)
+    onChoiceClick(choice.value)
+  }
+
+  const envSummary = (env: Record<string, string>) => {
+    const entries = Object.entries(env)
+    if (entries.length === 0) return ''
+    return entries.map(([k, v]) => {
+      const short = v.length > 20 ? v.slice(0, 20) + '...' : v
+      return `${k}=${short}`
+    }).join('  ')
   }
 
   return (
@@ -67,6 +106,122 @@ export default function MessageBubble({ message, onExecute, onDismissPlan, execu
           <span style={{ color: '#9ca3af', fontSize: 13 }}>&#9608;</span>
         )}
 
+        {/* ── Multi-plan card ── */}
+        {message.plans && message.plans.length > 0 && (
+          <div style={{
+            marginTop: 12,
+            padding: '12px 14px',
+            borderRadius: 10,
+            backgroundColor: '#fff',
+            border: '1px solid #d1d5db',
+            fontSize: 13,
+          }}>
+            {/* Header */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontWeight: 700,
+              fontSize: 13,
+              color: '#374151',
+              marginBottom: 10,
+            }}>
+              <span style={{
+                display: 'inline-block',
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                backgroundColor: '#f59e0b',
+              }} />
+              Confirm execution ({message.plans.length} projects)
+            </div>
+
+            {/* Plan rows */}
+            {message.plans.map((plan, idx) => (
+              <label
+                key={idx}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 8,
+                  padding: '8px 10px',
+                  borderRadius: 6,
+                  backgroundColor: selectedPlans.has(idx) ? '#f0fdf4' : '#f9fafb',
+                  border: `1px solid ${selectedPlans.has(idx) ? '#86efac' : '#e5e7eb'}`,
+                  marginBottom: 4,
+                  cursor: executing ? 'not-allowed' : 'pointer',
+                  transition: 'background-color 0.15s, border-color 0.15s',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedPlans.has(idx)}
+                  onChange={() => togglePlan(idx)}
+                  disabled={executing}
+                  style={{ marginTop: 2, accentColor: '#059669' }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, color: '#1f2937' }}>
+                    {plan.label || plan.target}
+                  </div>
+                  <div style={{
+                    fontSize: 12,
+                    color: '#6b7280',
+                    fontFamily: 'monospace',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {plan.target}
+                    {envSummary(plan.env) && <span style={{ marginLeft: 8 }}>{envSummary(plan.env)}</span>}
+                  </div>
+                </div>
+              </label>
+            ))}
+
+            {/* Action buttons */}
+            {onExecuteBatch && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <button
+                  onClick={handleExecuteBatchClick}
+                  disabled={executing || selectedPlans.size === 0}
+                  style={{
+                    flex: 1,
+                    padding: '8px 0',
+                    borderRadius: 7,
+                    border: 'none',
+                    backgroundColor: (executing || selectedPlans.size === 0) ? '#9ca3af' : '#059669',
+                    color: '#fff',
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: (executing || selectedPlans.size === 0) ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {executing ? 'Executing...' : `Execute All (${selectedPlans.size})`}
+                </button>
+                {!executing && onDismissPlan && (
+                  <button
+                    onClick={onDismissPlan}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: 7,
+                      border: '1px solid #d1d5db',
+                      backgroundColor: '#fff',
+                      color: '#6b7280',
+                      fontWeight: 500,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Single plan card (backward compat) ── */}
         {message.plan && (
           <div style={{
             marginTop: 12,
@@ -293,6 +448,67 @@ export default function MessageBubble({ message, onExecute, onDismissPlan, execu
               </>
             )}
           </div>
+        )}
+
+        {/* ── Choices buttons ── */}
+        {message.choices && message.choices.length > 0 && (
+          <div style={{
+            marginTop: 12,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 8,
+          }}>
+            {message.choices.map((choice, idx) => {
+              const disabled = choiceClicked || !onChoiceClick
+              return (
+                <button
+                  key={idx}
+                  onClick={() => handleChoiceSelect(choice)}
+                  disabled={disabled}
+                  style={{
+                    flex: '1 1 140px',
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    border: '1px solid #d1d5db',
+                    backgroundColor: disabled ? '#f9fafb' : '#fff',
+                    color: disabled ? '#9ca3af' : '#1f2937',
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!disabled) {
+                      e.currentTarget.style.borderColor = '#2563eb'
+                      e.currentTarget.style.backgroundColor = '#eff6ff'
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!disabled) {
+                      e.currentTarget.style.borderColor = '#d1d5db'
+                      e.currentTarget.style.backgroundColor = '#fff'
+                    }
+                  }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{choice.label}</div>
+                  {choice.description && (
+                    <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                      {choice.description}
+                    </div>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* ── Project select card ── */}
+        {message.projectSelect && message.projectSelect.length > 0 && (
+          <ProjectSelectCard
+            projects={message.projectSelect}
+            onConfirm={onProjectConfirm ?? (() => {})}
+            onDismiss={onProjectConfirm ? () => onProjectConfirm([]) : () => {}}
+            disabled={!onProjectConfirm}
+          />
         )}
 
         {message.runId && (

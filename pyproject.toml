@@ -23,6 +23,9 @@ ora-automation-api = "ora_automation_api.main:main"
 ora-automation-worker = "ora_automation_api.worker:main"
 ora-automation-chatbot = "ora_rd_orchestrator.chatbot:main"
 
+[project.optional-dependencies]
+web = ["scrapling>=0.4.0"]
+
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"

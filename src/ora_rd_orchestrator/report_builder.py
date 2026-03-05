@@ -28,8 +28,114 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Shared topic payload builder (used by all LLM report generators)
+# ---------------------------------------------------------------------------
+
+def _build_topic_payload(
+    items: list[dict] | dict[str, TopicState],
+    states: dict[str, TopicState],
+    scores: dict[str, dict[str, float]] | None = None,
+    agent_decisions: dict[str, list[dict]] | None = None,
+    max_evidence_snippets: int = 6,
+    include_projects: bool = False,
+    include_project_hits: bool = False,
+    include_code_doc: bool = False,
+    include_agent_scores: bool = False,
+    include_agent_decisions: bool = False,
+    include_evidence_files: bool = False,
+) -> list[dict]:
+    """Build topic payload dicts from ranked items or all states."""
+    result: list[dict] = []
+    # Support iterating over ranked list[dict] or all states dict
+    if isinstance(items, dict):
+        entries = [
+            {"topic_id": tid, "topic_name": s.topic_name}
+            for tid, s in items.items()
+        ]
+    else:
+        entries = items
+
+    for item in entries:
+        topic_id = item["topic_id"]
+        state = states.get(topic_id)
+        if not state:
+            continue
+        payload: dict[str, Any] = {
+            "topic_id": topic_id,
+            "topic_name": item.get("topic_name", state.topic_name),
+            "total_score": item.get("total_score", 0),
+            "features": item.get("features", {}),
+            "evidence_count": len(state.evidence),
+            "project_count": state.project_count,
+        }
+        if include_projects:
+            payload["projects"] = sorted(state.project_hits.keys())
+        if include_project_hits:
+            payload["project_hits"] = dict(state.project_hits)
+        if include_code_doc:
+            payload["code_hits"] = state.code_hits
+            payload["doc_hits"] = state.doc_hits
+        snippets = state.evidence[:max_evidence_snippets]
+        if include_evidence_files:
+            payload["evidence_snippets"] = [
+                {"file": e.file, "snippet": e.snippet} for e in snippets
+            ]
+        else:
+            payload["evidence_snippets"] = [e.snippet for e in snippets]
+        if include_agent_scores and scores:
+            payload["agent_scores"] = scores.get(topic_id, {})
+        if include_agent_decisions and agent_decisions:
+            payload["agent_decisions"] = agent_decisions.get(topic_id, [])
+        result.append(payload)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # LLM-driven strategy card generation
 # ---------------------------------------------------------------------------
+
+def _build_aggregate_stats(
+    states: dict[str, TopicState],
+    scores: dict[str, dict[str, float]] | None = None,
+    research_sources: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Build aggregate statistics for grounding LLM prompts."""
+    total_evidence = sum(len(s.evidence) for s in states.values())
+    total_code = sum(s.code_hits for s in states.values())
+    total_doc = sum(s.doc_hits for s in states.values())
+    total_projects = len({p for s in states.values() for p in s.project_hits})
+    source_count = len(research_sources or [])
+    verified_sources = sum(
+        1 for s in (research_sources or []) if s.get("status") == "search_verified"
+    )
+
+    score_values: list[float] = []
+    if scores:
+        for per_topic in scores.values():
+            for v in per_topic.values():
+                try:
+                    score_values.append(float(v))
+                except (TypeError, ValueError):
+                    pass
+
+    stats: dict[str, Any] = {
+        "total_topics": len(states),
+        "total_evidence_snippets": total_evidence,
+        "total_code_hits": total_code,
+        "total_doc_hits": total_doc,
+        "unique_projects": total_projects,
+        "research_sources_total": source_count,
+        "research_sources_verified": verified_sources,
+    }
+    if score_values:
+        stats["score_distribution"] = {
+            "min": round(min(score_values), 2),
+            "max": round(max(score_values), 2),
+            "mean": round(sum(score_values) / len(score_values), 2),
+            "count": len(score_values),
+        }
+    return stats
+
 
 def generate_strategy_cards_via_llm(
     top_topics: list[dict],
@@ -40,26 +146,14 @@ def generate_strategy_cards_via_llm(
     sources: list[dict[str, str]] | None = None,
 ) -> list[dict]:
     """Generate strategy cards entirely via LLM."""
-    topics_payload = []
-    for item in top_topics:
-        topic_id = item["topic_id"]
-        state = states.get(topic_id)
-        if not state:
-            continue
-        topics_payload.append({
-            "topic_id": topic_id,
-            "topic_name": item["topic_name"],
-            "total_score": item.get("total_score", 0),
-            "features": item.get("features", {}),
-            "evidence_count": len(state.evidence),
-            "project_count": state.project_count,
-            "projects": sorted(state.project_hits.keys()),
-            "evidence_snippets": [e.snippet for e in state.evidence[:6]],
-            "agent_decisions": (agent_decisions or {}).get(topic_id, []),
-        })
+    topics_payload = _build_topic_payload(
+        top_topics, states, agent_decisions=agent_decisions,
+        include_projects=True, include_agent_decisions=True,
+    )
 
     payload = {
         "version": "llm-strategy-v1",
+        "aggregate_stats": _build_aggregate_stats(states, research_sources=sources),
         "output_contract": {
             "strategy_cards": [{
                 "topic_id": "string",
@@ -183,24 +277,10 @@ def run_qa_verification_via_llm(
     llm_timeout: float = 30.0,
 ) -> list[dict]:
     """Run QA verification on selected topics via LLM."""
-    topics_payload = []
-    for item in top_topics:
-        topic_id = item["topic_id"]
-        state = states.get(topic_id)
-        if not state:
-            continue
-        topics_payload.append({
-            "topic_id": topic_id,
-            "topic_name": item["topic_name"],
-            "total_score": item.get("total_score", 0),
-            "features": item.get("features", {}),
-            "evidence_count": len(state.evidence),
-            "code_hits": state.code_hits,
-            "doc_hits": state.doc_hits,
-            "project_count": state.project_count,
-            "evidence_snippets": [e.snippet for e in state.evidence[:4]],
-            "agent_scores": scores.get(topic_id, {}),
-        })
+    topics_payload = _build_topic_payload(
+        top_topics, states, scores=scores,
+        max_evidence_snippets=4, include_code_doc=True, include_agent_scores=True,
+    )
 
     payload = {
         "version": "llm-qa-v1",
@@ -252,22 +332,10 @@ def generate_executive_summary_via_llm(
     feasibility_evidence: dict | None = None,
 ) -> dict:
     """Generate Executive Summary via LLM."""
-    topics_payload = []
-    for item in ranked:
-        topic_id = item["topic_id"]
-        state = states.get(topic_id)
-        if not state:
-            continue
-        topics_payload.append({
-            "topic_id": topic_id,
-            "topic_name": item["topic_name"],
-            "total_score": item.get("total_score", 0),
-            "features": item.get("features", {}),
-            "evidence_count": len(state.evidence),
-            "project_count": state.project_count,
-            "agent_scores": scores.get(topic_id, {}),
-            "agent_decisions": (agent_decisions or {}).get(topic_id, []),
-        })
+    topics_payload = _build_topic_payload(
+        ranked, states, scores=scores, agent_decisions=agent_decisions,
+        max_evidence_snippets=0, include_agent_scores=True, include_agent_decisions=True,
+    )
 
     consensus = consensus_summary or {}
     cards_summary = []
@@ -282,6 +350,7 @@ def generate_executive_summary_via_llm(
 
     payload = {
         "version": "llm-executive-summary-v1",
+        "aggregate_stats": _build_aggregate_stats(states, scores=scores, research_sources=research_sources),
         "system_prompt": (
             "You are a PhD-level R&D strategist and Google Staff Engineer-level technical advisor. "
             "Write a comprehensive Executive Summary for an R&D strategy report. "
@@ -336,22 +405,11 @@ def generate_asis_analysis_via_llm(
     llm_timeout: float = LLM_REPORT_SECTION_TIMEOUT_SECONDS,
 ) -> dict:
     """Generate As-Is (current technology status) analysis via LLM."""
-    topics_payload = []
-    for topic_id, state in states.items():
-        topics_payload.append({
-            "topic_id": topic_id,
-            "topic_name": state.topic_name,
-            "code_hits": state.code_hits,
-            "doc_hits": state.doc_hits,
-            "evidence_count": len(state.evidence),
-            "project_count": state.project_count,
-            "project_hits": dict(state.project_hits),
-            "evidence_snippets": [
-                {"file": e.file, "snippet": e.snippet}
-                for e in state.evidence[:6]
-            ],
-            "agent_scores": scores.get(topic_id, {}),
-        })
+    topics_payload = _build_topic_payload(
+        states, states, scores=scores,
+        include_code_doc=True, include_project_hits=True,
+        include_agent_scores=True, include_evidence_files=True,
+    )
 
     # Aggregate stats
     total_evidence = sum(len(s.evidence) for s in states.values())
@@ -372,7 +430,7 @@ def generate_asis_analysis_via_llm(
             "- Strengths: areas where code_hits AND project_count are high = mature implementation. "
             "Cite evidence snippets\n"
             "- Weaknesses/tech debt: where doc_hits >> code_hits (discussed but not implemented), "
-            "high risk_penalty topics, areas lacking evidence\n"
+            "topics with high features.risk_penalty score (>6.0), areas lacking evidence\n"
             "- Maturity matrix: rate each topic as Conceptual → Prototype → Integrated → Production\n"
             "- Every claim MUST have quantitative data\n"
             "- 1000-1500 words, in Korean\n\n"
@@ -425,23 +483,10 @@ def generate_tobe_direction_via_llm(
     research_sources: list[dict[str, str]] | None = None,
 ) -> dict:
     """Generate To-Be technology direction via LLM."""
-    topics_payload = []
-    for item in ranked:
-        topic_id = item["topic_id"]
-        state = states.get(topic_id)
-        if not state:
-            continue
-        topics_payload.append({
-            "topic_id": topic_id,
-            "topic_name": item["topic_name"],
-            "total_score": item.get("total_score", 0),
-            "features": item.get("features", {}),
-            "evidence_snippets": [
-                {"file": e.file, "snippet": e.snippet}
-                for e in state.evidence[:4]
-            ],
-            "project_hits": dict(state.project_hits),
-        })
+    topics_payload = _build_topic_payload(
+        ranked, states,
+        max_evidence_snippets=4, include_project_hits=True, include_evidence_files=True,
+    )
 
     cards_payload = []
     for card in (strategy_cards or []):
@@ -463,9 +508,10 @@ def generate_tobe_direction_via_llm(
             "WebSocket bidirectional streaming, P99 latency ~800ms → <200ms expected'\n"
             "- Architecture changes: new components, changed interfaces, deprecated patterns. "
             "Reference evidence file/project names\n"
-            "- Expected performance/quality improvements: quantify using industry benchmarks + "
-            "provided paper results\n"
-            "- Technology dependency chain: precedence between topics, shared infrastructure\n"
+            "- Expected performance/quality improvements: quantify based on feature scores (impact, feasibility) "
+            "and research_sources summaries. Only cite benchmarks that appear in the provided data\n"
+            "- Technology dependency chain: infer precedence between topics from shared projects "
+            "(project_hits overlap) and feature complementarity\n"
             "- 1200-1800 words, in Korean\n"
             "- Every claim must have quantitative backing\n\n"
             "Return JSON: {\"tobe_direction\": {\"per_topic\": "
@@ -485,7 +531,8 @@ def generate_tobe_direction_via_llm(
         "asis_analysis": asis_analysis or {},
         "strategy_cards": cards_payload,
         "research_sources": [
-            {"title": s.get("title", ""), "url": s.get("url", ""), "summary": s.get("summary", "")}
+            {"title": s.get("title", ""), "url": s.get("url", ""), "summary": s.get("summary", ""),
+             "id": s.get("id", ""), "provider": s.get("provider", ""), "published": s.get("published", "")}
             for s in (research_sources or [])[:15]
         ],
     }
@@ -510,28 +557,11 @@ def generate_feasibility_evidence_via_llm(
     pipeline_decisions: list | None = None,
 ) -> dict:
     """Generate feasibility evidence via LLM."""
-    topics_payload = []
-    for item in ranked:
-        topic_id = item["topic_id"]
-        state = states.get(topic_id)
-        if not state:
-            continue
-        topics_payload.append({
-            "topic_id": topic_id,
-            "topic_name": item["topic_name"],
-            "total_score": item.get("total_score", 0),
-            "features": item.get("features", {}),
-            "code_hits": state.code_hits,
-            "doc_hits": state.doc_hits,
-            "evidence_count": len(state.evidence),
-            "project_count": state.project_count,
-            "project_hits": dict(state.project_hits),
-            "evidence_snippets": [
-                {"file": e.file, "snippet": e.snippet}
-                for e in state.evidence[:6]
-            ],
-            "agent_scores": scores.get(topic_id, {}),
-        })
+    topics_payload = _build_topic_payload(
+        ranked, states, scores=scores,
+        include_code_doc=True, include_project_hits=True,
+        include_agent_scores=True, include_evidence_files=True,
+    )
 
     agent_roles = []
     for agent_name, definition in (agent_definitions or {}).items():
@@ -553,6 +583,7 @@ def generate_feasibility_evidence_via_llm(
 
     payload = {
         "version": "llm-feasibility-evidence-v1",
+        "aggregate_stats": _build_aggregate_stats(states, scores=scores, research_sources=research_sources),
         "system_prompt": (
             "You are a PhD-level R&D strategist and Google Staff Engineer-level technical advisor. "
             "Write a comprehensive feasibility evidence analysis. "
@@ -562,8 +593,9 @@ def generate_feasibility_evidence_via_llm(
             "- Team capability evidence: map agent scores to real team capabilities. "
             "Example: 'Developer 8.2 + Researcher 7.8 = implementation power + academic foundation'\n"
             "- Market/industry evidence: ground in business_hits + novelty_hits for market relevance\n"
-            "- Academic evidence: cite papers with arXiv ID. "
-            "Example: 'MetaRAG (arXiv:2509.09360) demonstrated 23% reduction in RAG hallucination'\n"
+            "- Academic evidence: cite papers using the 'id' and 'title' fields from research_sources. "
+            "Example: 'MetaRAG (arXiv:2509.09360) demonstrated 23% reduction in RAG hallucination'. "
+            "ONLY cite papers that appear in the research_sources list — do NOT invent paper IDs\n"
             "- Per-topic feasibility verdict: HIGH(>70%) / MEDIUM(40-70%) / LOW(<40%)\n"
             "- 1000-1500 words, in Korean\n"
             "- Every claim must have quantitative backing\n\n"
@@ -590,7 +622,9 @@ def generate_feasibility_evidence_via_llm(
         },
         "research_sources": [
             {"title": s.get("title", ""), "url": s.get("url", ""),
-             "summary": s.get("summary", ""), "authors": s.get("authors", "")}
+             "summary": s.get("summary", ""), "authors": s.get("authors", ""),
+             "id": s.get("id", ""), "provider": s.get("provider", ""),
+             "published": s.get("published", "")}
             for s in (research_sources or [])[:15]
         ],
         "pipeline_decisions": decisions_payload[:20],
@@ -1312,14 +1346,22 @@ def to_json(
     asis_analysis: dict | None = None,
     tobe_direction: dict | None = None,
     feasibility_evidence: dict | None = None,
+    # --- precomputed values (avoid recomputation) ---
+    precomputed_agent_rankings: dict[str, list[str]] | None = None,
+    precomputed_research_queries: list[dict[str, object]] | None = None,
 ) -> dict:
-    from .research import build_research_queries
-
-    agent_rankings_map = build_agent_rankings(scores, top_k=max(1, len(ranked)))
+    if precomputed_agent_rankings is not None:
+        agent_rankings_map = precomputed_agent_rankings
+    else:
+        agent_rankings_map = build_agent_rankings(scores, top_k=max(1, len(ranked)))
     consensus = []
     if consensus_summary:
         consensus = list(consensus_summary.get("final_consensus_ids", []))
-    research_queries = build_research_queries(ranked, topic_keywords=topic_keywords, top_k=min(6, len(ranked)))
+    if precomputed_research_queries is not None:
+        research_queries = precomputed_research_queries
+    else:
+        from .research import build_research_queries
+        research_queries = build_research_queries(ranked, topic_keywords=topic_keywords, top_k=min(6, len(ranked)))
     selected = ranked[:len(ranked)]
     agent_decisions = selected_agent_decisions or {}
     orchestration_stages = _normalize_stages(orchestration_stages, fallback=ORCHESTRATION_STAGES_DEFAULT)
@@ -1370,4 +1412,14 @@ def to_json(
         result["feasibility_evidence"] = feasibility_evidence
     if hierarchical_analysis:
         result["hierarchical_analysis"] = hierarchical_analysis
+
+    # Section completion metadata — tells consumers which LLM sections succeeded
+    result["section_status"] = {
+        "executive_summary": "ok" if executive_summary else "skipped",
+        "asis_analysis": "ok" if asis_analysis else "skipped",
+        "tobe_direction": "ok" if tobe_direction else "skipped",
+        "feasibility_evidence": "ok" if feasibility_evidence else "skipped",
+        "strategy_cards": "ok" if strategy_cards_prebuilt else "fallback",
+        "qa_verification": "ok" if qa_verification else "skipped",
+    }
     return result

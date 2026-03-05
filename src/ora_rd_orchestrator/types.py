@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import Any, Callable
 
 
 @dataclass
@@ -72,15 +73,25 @@ class TopicState:
     project_hits: dict[str, int] = field(default_factory=dict)
     evidence: list[Evidence] = field(default_factory=list)
     project_count: int = 0
+    _features_cache: dict[str, float] | None = field(default=None, repr=False, compare=False)
+    _features_cache_key: tuple | None = field(default=None, repr=False, compare=False)
 
     def normalized_score(self, value: float) -> float:
         return max(0.0, min(10.0, round(value, 2)))
+
+    def _cache_key(self) -> tuple:
+        return (self.keyword_hits, self.business_hits, self.novelty_hits,
+                self.code_hits, self.doc_hits, self.history_hits, self.project_count)
 
     def compute_features(self) -> dict[str, float]:
         """Legacy feature computation formula. Kept for backward compat.
 
         In LLM-driven mode, scoring.py replaces this with LLM calls.
         """
+        key = self._cache_key()
+        if self._features_cache is not None and self._features_cache_key == key:
+            return self._features_cache
+
         weighted_hits = self.keyword_hits + (self.code_hits * 0.4) + (self.doc_hits * 0.25)
         project_factor = math.log1p(self.project_count)
 
@@ -107,7 +118,7 @@ class TopicState:
             max(0.0, 5.0 - (0.9 * self.code_hits + 0.6 * self.project_count))
         )
 
-        return {
+        result = {
             "impact": impact,
             "feasibility": feasibility,
             "novelty": novelty,
@@ -115,6 +126,9 @@ class TopicState:
             "risk_penalty": risk_penalty,
             "weighted_hits": round(weighted_hits, 2),
         }
+        self._features_cache = result
+        self._features_cache_key = key
+        return result
 
     def to_dict(self) -> dict:
         feature = self.compute_features()
@@ -212,3 +226,37 @@ class LLMResult:
     parsed: dict = field(default_factory=dict)
     raw_output: str = ""
     elapsed_seconds: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Interactive checkpoint types
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CheckpointData:
+    """Payload sent to the checkpoint callback at a pipeline pause point."""
+    stage: str                          # e.g. "topic_discovery", "deliberation"
+    message: str                        # human-readable summary
+    items: list[dict[str, Any]] = field(default_factory=list)   # e.g. discovered topics
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "stage": self.stage,
+            "message": self.message,
+            "items": self.items,
+            "metadata": self.metadata,
+        }
+
+
+@dataclass
+class CheckpointResponse:
+    """Response from the user/system to a checkpoint."""
+    approved: bool = True
+    feedback: str = ""
+    modified_items: list[dict[str, Any]] | None = None  # user can edit topic list etc.
+
+
+# Callable type: receives CheckpointData, returns CheckpointResponse.
+# When None, the pipeline runs without pausing (default behavior).
+CheckpointCallback = Callable[[CheckpointData], CheckpointResponse] | None

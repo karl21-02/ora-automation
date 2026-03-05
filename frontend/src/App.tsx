@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import ChatWindow from './components/ChatWindow'
 import ReportViewer from './components/ReportViewer'
 import Sidebar from './components/Sidebar'
-import { createConversation, getConversation, listConversations } from './lib/api'
+import { createConversation, deleteConversation, getConversation, listConversations, renameConversation } from './lib/api'
 import type { Conversation, Message } from './types'
 
 const ACTIVE_KEY = 'ora-chatbot-active-id'
@@ -40,14 +40,32 @@ export default function App() {
                   id: detail.id,
                   title: detail.title,
                   createdAt: new Date(detail.created_at),
-                  messages: detail.messages.map((m) => ({
-                    id: String(m.id),
-                    role: m.role as 'user' | 'assistant',
-                    content: m.content,
-                    plan: m.plan ? { target: m.plan.target, env: m.plan.env } : undefined,
-                    runId: m.run_id,
-                    timestamp: new Date(m.created_at),
-                  })),
+                  messages: detail.messages.map((m) => {
+                    const planData = m.plan as Record<string, unknown> | null
+                    const msg: Message = {
+                      id: String(m.id),
+                      role: m.role as 'user' | 'assistant',
+                      content: m.content,
+                      runId: m.run_id,
+                      timestamp: new Date(m.created_at),
+                    }
+                    if (planData) {
+                      if ('plans' in planData && Array.isArray(planData.plans)) {
+                        msg.plans = planData.plans as Message['plans']
+                      } else if ('choices' in planData && Array.isArray(planData.choices)) {
+                        msg.choices = planData.choices as Message['choices']
+                      } else if ('project_select' in planData && Array.isArray(planData.project_select)) {
+                        msg.projectSelect = planData.project_select as Message['projectSelect']
+                      } else if ('target' in planData) {
+                        msg.plan = {
+                          target: planData.target as string,
+                          env: (planData.env as Record<string, string>) || {},
+                          label: (planData.label as string) || undefined,
+                        }
+                      }
+                    }
+                    return msg
+                  }),
                 }
               } catch {
                 return {
@@ -132,6 +150,38 @@ export default function App() {
     setActiveId(conv.id)
   }, [])
 
+  const handleDeleteConversation = useCallback(async (id: string) => {
+    try {
+      await deleteConversation(id)
+    } catch {
+      // proceed locally even if DB fails
+    }
+    setConversations((prev) => {
+      const remaining = prev.filter((c) => c.id !== id)
+      if (remaining.length === 0) {
+        const conv = newConversation()
+        createConversation(conv.id, conv.title).catch(() => {})
+        setActiveId(conv.id)
+        return [conv]
+      }
+      if (id === activeId) {
+        setActiveId(remaining[0].id)
+      }
+      return remaining
+    })
+  }, [activeId])
+
+  const handleRenameConversation = useCallback(async (id: string, title: string) => {
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, title } : c))
+    )
+    try {
+      await renameConversation(id, title)
+    } catch {
+      // local state already updated
+    }
+  }, [])
+
   if (!dbReady || !activeConv) {
     return (
       <div style={{
@@ -161,6 +211,8 @@ export default function App() {
         onSelectConversation={setActiveId}
         onNewConversation={handleNewConversation}
         onSelectReport={setReportFile}
+        onDeleteConversation={handleDeleteConversation}
+        onRenameConversation={handleRenameConversation}
       />
       <ChatWindow
         key={activeConv.id}

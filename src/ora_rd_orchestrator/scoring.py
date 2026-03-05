@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from .config import LLM_SCORING_CMD_ENV
@@ -69,7 +70,7 @@ def _build_scoring_payload(
             "project_count": state.project_count,
             "evidence_sample": [
                 {"file": e.file, "snippet": e.snippet}
-                for e in state.evidence[:4]
+                for e in state.evidence[:8]
             ],
         }
 
@@ -95,21 +96,48 @@ def _parse_scoring_result(
         return {}
 
     parsed: dict[str, dict[str, float]] = {}
+    _SCORE_KEYS = ("impact", "feasibility", "novelty", "research_signal", "risk_penalty")
     for topic_id in topic_ids:
         item = scores_raw.get(topic_id)
         if not isinstance(item, dict):
             continue
         features: dict[str, float] = {}
-        for key in ("impact", "feasibility", "novelty", "research_signal", "risk_penalty"):
-            try:
-                features[key] = _clamp(float(item.get(key, 5.0)))
-            except (TypeError, ValueError):
+        defaults_used = 0
+        for key in _SCORE_KEYS:
+            raw = item.get(key)
+            if raw is None:
                 features[key] = 5.0
+                defaults_used += 1
+            else:
+                try:
+                    features[key] = _clamp(float(raw))
+                except (TypeError, ValueError):
+                    features[key] = 5.0
+                    defaults_used += 1
         features["support"] = 1.0 if item.get("support") else 0.0
         features["challenge"] = 1.0 if item.get("challenge") else 0.0
+        # Track how many features were actual LLM output vs defaults
+        features["feature_completeness"] = round(
+            1.0 - (defaults_used / len(_SCORE_KEYS)), 2
+        )
         parsed[topic_id] = features
 
     return parsed
+
+
+def _legacy_score_topics(
+    topic_states: dict[str, TopicState],
+    persona: AgentPersona,
+) -> dict[str, dict[str, float]]:
+    """Fallback scoring using TopicState.compute_features() when LLM is unavailable."""
+    result: dict[str, dict[str, float]] = {}
+    for topic_id, state in topic_states.items():
+        features = state.compute_features()
+        features["support"] = 0.0
+        features["challenge"] = 0.0
+        features["feature_completeness"] = 0.0  # all defaults — signal to downstream
+        result[topic_id] = features
+    return result
 
 
 def score_topics_for_agent(
@@ -119,7 +147,7 @@ def score_topics_for_agent(
     llm_command: str,
     llm_timeout: float = 10.0,
 ) -> dict[str, dict[str, float]]:
-    """Score all topics for a single agent via LLM."""
+    """Score all topics for a single agent via LLM. Falls back to legacy formula."""
     system_prompt = _SCORING_SYSTEM_PROMPT.format(
         persona_prompt=persona.system_prompt[:2000],
     )
@@ -131,20 +159,32 @@ def score_topics_for_agent(
         system_prompt=system_prompt,
     )
     parsed = _parse_scoring_result(result, list(topic_states.keys()))
-    if not parsed:
-        raise RuntimeError(
-            f"LLM scoring failed for agent {agent_id}: {result.status} - "
-            f"{result.parsed.get('reason', 'unknown')}"
-        )
-    logger.info("LLM scored %d topics for agent %s", len(parsed), agent_id)
-    return parsed
+    if parsed:
+        logger.info("LLM scored %d topics for agent %s", len(parsed), agent_id)
+        return parsed
+
+    # Fallback to legacy formula instead of crashing the pipeline
+    logger.warning(
+        "LLM scoring failed for agent %s (%s), falling back to legacy formula",
+        agent_id, result.status,
+    )
+    return _legacy_score_topics(topic_states, persona)
 
 
 def compute_agent_score(
     features: dict[str, float],
     weights: dict[str, float],
 ) -> float:
-    """Compute a weighted agent score from LLM-provided features and weight profile."""
+    """Compute a weighted agent score from LLM-provided features and weight profile.
+
+    Weights are normalized to sum to 1.0 before computing the score, so agents
+    with different weight sums (e.g. CEO=0.90 vs Ops=1.00) produce comparable
+    scores.  Applies a small penalty when feature_completeness < 1.0.
+    """
+    # Normalize weights so they sum to 1.0
+    weight_sum = sum(abs(w) for w in weights.values())
+    norm = weight_sum if weight_sum > 0 else 1.0
+
     total = 0.0
     for key, weight in weights.items():
         if key == "risk":
@@ -152,9 +192,13 @@ def compute_agent_score(
         else:
             val = features.get(key, 5.0)
         try:
-            total += weight * float(val)
+            total += (weight / norm) * float(val)
         except (TypeError, ValueError):
-            total += weight * 5.0
+            total += (weight / norm) * 5.0
+    # Penalize scores with missing features: up to -0.5 when all features are defaults
+    completeness = features.get("feature_completeness", 1.0)
+    if completeness < 1.0:
+        total *= 0.95 + 0.05 * completeness  # 5% max penalty
     return _clamp(total)
 
 
@@ -164,21 +208,48 @@ def score_all_agents(
     llm_command: str,
     llm_timeout: float = 10.0,
     agent_definitions: dict[str, dict[str, Any]] | None = None,
+    agent_filter: set[str] | None = None,
+    max_workers: int = 6,
 ) -> dict[str, dict[str, dict[str, float]]]:
     """Score all topics for all agents via LLM.
 
+    Parameters
+    ----------
+    agent_filter:
+        If provided, only score agents whose ``agent_id`` is in this set.
+        Useful in flat mode where only 7 agents contribute to final ranking.
+    max_workers:
+        Maximum concurrent LLM calls for scoring.
+
     Returns ``{agent_id: {topic_id: {feature: value, ...}}}``
     """
+    target_personas = {
+        aid: p for aid, p in personas.items()
+        if agent_filter is None or aid in agent_filter
+    }
+    logger.info(
+        "Scoring %d agents (filter=%s, workers=%d)",
+        len(target_personas),
+        len(agent_filter) if agent_filter else "all",
+        max_workers,
+    )
+
     all_scores: dict[str, dict[str, dict[str, float]]] = {}
 
-    for agent_id, persona in personas.items():
-        scores = score_topics_for_agent(
-            agent_id=agent_id,
-            topic_states=topic_states,
-            persona=persona,
-            llm_command=llm_command,
-            llm_timeout=llm_timeout,
-        )
-        all_scores[agent_id] = scores
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                score_topics_for_agent,
+                agent_id=agent_id,
+                topic_states=topic_states,
+                persona=persona,
+                llm_command=llm_command,
+                llm_timeout=llm_timeout,
+            ): agent_id
+            for agent_id, persona in target_personas.items()
+        }
+        for future in as_completed(futures):
+            agent_id = futures[future]
+            all_scores[agent_id] = future.result()
 
     return all_scores

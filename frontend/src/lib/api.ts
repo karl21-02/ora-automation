@@ -1,4 +1,4 @@
-import type { ChatPlan, ChatResponse, OrchestrationEvent, OrchestrationRun, ReportListItem } from '../types'
+import type { ChatChoice, ChatPlan, ChatResponse, OrchestrationEvent, OrchestrationRun, ProjectInfo, ReportListItem } from '../types'
 
 const BASE = '/api/v1'
 
@@ -32,7 +32,10 @@ export interface StreamEvent {
   type: 'token' | 'done' | 'error'
   content?: string
   full_reply?: string
-  plan?: { target: string; env: Record<string, string> } | null
+  plan?: { target: string; env: Record<string, string>; label?: string } | null
+  plans?: { target: string; env: Record<string, string>; label?: string }[] | null
+  choices?: ChatChoice[] | null
+  project_select?: ProjectInfo[] | null
 }
 
 export async function sendChatStream(
@@ -101,6 +104,17 @@ export async function createRun(plan: ChatPlan, userPrompt: string): Promise<Orc
   })
 }
 
+export async function createBatchRuns(
+  plans: ChatPlan[],
+  userPrompt: string,
+): Promise<{ runs: OrchestrationRun[] }> {
+  return request<{ runs: OrchestrationRun[] }>(`${BASE}/orchestrations/batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_prompt: userPrompt, plans }),
+  })
+}
+
 export async function getRun(runId: string): Promise<OrchestrationRun> {
   return request<OrchestrationRun>(`${BASE}/orchestrations/${runId}`)
 }
@@ -128,7 +142,7 @@ export interface ConversationDetail extends ConversationSummary {
     conversation_id: string
     role: 'user' | 'assistant'
     content: string
-    plan: { target: string; env: Record<string, string> } | null
+    plan: Record<string, unknown> | null
     run_id: string | null
     created_at: string
   }[]
@@ -152,4 +166,18 @@ export async function getConversation(conversationId: string): Promise<Conversat
 
 export async function deleteConversation(conversationId: string): Promise<void> {
   await fetch(`${BASE}/conversations/${conversationId}`, { method: 'DELETE' })
+}
+
+export async function renameConversation(id: string, title: string): Promise<ConversationSummary> {
+  return request<ConversationSummary>(`${BASE}/conversations/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+}
+
+// ── Projects ──────────────────────────────────────────────────────
+
+export async function listProjects(): Promise<ProjectInfo[]> {
+  return request<ProjectInfo[]>(`${BASE}/projects`)
 }

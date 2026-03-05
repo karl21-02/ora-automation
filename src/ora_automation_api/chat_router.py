@@ -24,11 +24,13 @@ from ora_rd_orchestrator.chatbot import (
     _coerce_plan,
     _extract_json,
 )
+from ora_rd_orchestrator.gemini_provider import _get_ssl_context
 
 from .config import settings
 from .database import SessionLocal, get_db
 from .models import ChatConversation, ChatMessageRow
 from .schemas import (
+    ChatChoice,
     ChatMessageRead,
     ChatPlan,
     ChatRequest,
@@ -37,6 +39,7 @@ from .schemas import (
     ConversationDetail,
     ConversationList,
     ConversationRead,
+    ProjectInfo,
     ReportListItem,
 )
 
@@ -44,15 +47,29 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 
+# Pre-compiled regex patterns
+_RE_JSON_BLOCK = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
+_RE_JSON_BLOCK_STRIP = re.compile(r"```json\s*\{.*?\}\s*```", re.DOTALL)
+
 # ── Gemini direct call (mirrors scripts/llm_round_openai.py pattern) ─────
 
 _SYSTEM_PROMPT = """\
-You are Ora, a friendly R&D orchestration assistant for the ora-automation platform.
+You are {assistant_name}, a friendly R&D orchestration assistant for the ora-automation platform.
 
 Your job:
 1. Chat naturally with the user to understand what they want to do.
 2. When you have enough information to execute an orchestration, include a JSON plan block.
 3. If the user's intent is still unclear, ask clarifying questions. Do NOT generate a plan until you are confident.
+
+IMPORTANT — Clarification-first policy:
+- ALWAYS ask what the user wants to research/test/analyze BEFORE showing a project picker or generating a plan.
+- For research: ask what topic, strategy, or area they want to focus on. Example: "어떤 주제에 대해 리서치하고 싶으세요? (예: 인증 시스템 개선, API 성능 최적화, 신규 기능 전략 등)"
+- For QA/testing: ask which service or test scope they want. Example: "어떤 서비스를 테스트할까요? 전체 E2E인가요, 특정 서비스인가요?"
+- Only after the user provides a clear topic/direction, THEN ask which projects OR show the project picker.
+- Never jump straight to plan generation or project selection from a vague request like "리서치하고 싶어" or "테스트 해줘".
+
+Available Ora projects:
+{project_list}
 
 Available make targets (allowed_targets):
 {allowed_targets}
@@ -66,65 +83,52 @@ Rules:
 - Set ORCHESTRATION_PROFILE=strict only when user explicitly asks for deep/strict deliberation.
 - Keep env minimal — only set keys the user mentioned or that are clearly needed.
 - For e2e-service, always set SERVICE (default "ai") unless user specifies otherwise.
+- For run-cycle, ALWAYS set FOCUS to the user's research topic/direction. Never leave FOCUS empty.
 
-When you are ready to propose a plan, include EXACTLY this JSON block at the END of your message:
+CRITICAL — Project picker rule:
+- Whenever the user asks which projects are available, or you need to ask which project(s) to target, you MUST include the project_select JSON block below. NEVER list project names as plain text.
+- This includes responses to questions like "어떤 프로젝트가 있어?", "프로젝트 목록 보여줘", or when you want to ask the user to pick projects.
+
+When you have confirmed the topic and need the user to select projects, show the project picker:
+```json
+{{"project_select": true, "message": "어떤 프로젝트를 검사할까요?"}}
+```
+This tells the system to show the user a project picker UI with checkboxes.
+Do NOT include plan_ready. After the user selects projects, they will tell you which ones they chose.
+Do NOT list project names in your text reply. The system will render the picker UI automatically.
+
+When you are ready to propose a plan for a SINGLE project, include EXACTLY this JSON block at the END of your message:
 ```json
 {{"target": "<target>", "env": {{"KEY": "VALUE"}}, "plan_ready": true}}
 ```
 
-If you are NOT ready (still chatting), do NOT include any JSON block. Just reply naturally in the user's language.\
+When the user has selected MULTIPLE projects (e.g. "다음 프로젝트 선택: A, B, C"), return a plans array with the confirmed topic in FOCUS:
+```json
+{{"plans": [
+  {{"target": "run-cycle", "env": {{"FOCUS": "<confirmed topic>"}}, "label": "ProjectA"}},
+  {{"target": "run-cycle", "env": {{"FOCUS": "<confirmed topic>"}}, "label": "ProjectB"}}
+], "plan_ready": true}}
+```
+For single project, use the existing single-plan format. For multiple projects, use the plans array.
+
+When asking the user to choose between options, include a choices block:
+```json
+{{"choices": [
+  {{"label": "All projects", "description": "Analyze all projects in parallel", "value": "Analyze all projects"}},
+  {{"label": "AI server only", "description": "Focus on OraAiServer", "value": "Analyze OraAiServer only"}}
+]}}
+```
+Do NOT include plan_ready in a choices block. Choices are for user input, not execution.
+
+If you are NOT ready (still chatting) and not presenting choices, do NOT include any JSON block. Just reply naturally in the user's language.\
 """
 
 
-def _resolve_ca_bundle() -> str:
-    env_bundle = os.getenv("ORA_RD_CA_BUNDLE", "").strip() or os.getenv("SSL_CERT_FILE", "").strip()
-    if env_bundle and os.path.exists(env_bundle):
-        return env_bundle
-    try:
-        import certifi
-
-        bundle = certifi.where()
-        if bundle and os.path.exists(bundle):
-            return bundle
-    except Exception:
-        pass
-    return ""
-
-
-def _urlopen(req: request.Request, timeout: float):
-    ca_bundle = _resolve_ca_bundle()
-    retries = 2
-    last_exc: Exception | None = None
-    for attempt in range(1, retries + 1):
-        try:
-            if ca_bundle:
-                context = ssl.create_default_context(cafile=ca_bundle)
-                return request.urlopen(req, timeout=timeout, context=context)
-            return request.urlopen(req, timeout=timeout)
-        except Exception as exc:
-            last_exc = exc
-            if attempt >= retries:
-                break
-            time.sleep(1.0 * attempt)
-    raise last_exc or RuntimeError("HTTP request failed")
-
-
-def _get_gemini_token() -> str:
-    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
-    if not cred_path or not os.path.exists(cred_path):
-        raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS not set or file missing")
-
-    from google.auth.transport.requests import Request as GoogleAuthRequest
-    from google.oauth2 import service_account
-
-    credentials = service_account.Credentials.from_service_account_file(
-        cred_path,
-        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-    )
-    credentials.refresh(GoogleAuthRequest())
-    if not credentials.token:
-        raise RuntimeError("Failed to obtain Google OAuth token")
-    return credentials.token
+from ora_rd_orchestrator.gemini_provider import (
+    _resolve_ca_bundle,
+    _urlopen,
+    _get_gemini_token,
+)
 
 
 def _call_gemini(system_prompt: str, contents: list[dict]) -> str:
@@ -193,11 +197,64 @@ def _call_gemini(system_prompt: str, contents: list[dict]) -> str:
     raise last_error or RuntimeError("All Gemini locations failed")
 
 
+_project_cache: list[ProjectInfo] | None = None
+_project_cache_time: float = 0.0
+_PROJECT_CACHE_TTL = 60.0  # seconds
+
+
+def _scan_projects() -> list[ProjectInfo]:
+    global _project_cache, _project_cache_time
+    now = time.monotonic()
+    if _project_cache is not None and now - _project_cache_time < _PROJECT_CACHE_TTL:
+        return _project_cache
+
+    root = settings.projects_root
+    if not root.is_dir():
+        _project_cache = []
+        _project_cache_time = now
+        return _project_cache
+    projects: list[ProjectInfo] = []
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir():
+            continue
+        name = entry.name
+        if name.startswith(".") or name == "__pycache__" or name == "node_modules":
+            continue
+        projects.append(ProjectInfo(
+            name=name,
+            path=str(entry),
+            has_makefile=(entry / "Makefile").is_file(),
+            has_dockerfile=(entry / "Dockerfile").is_file() or (entry / "docker-compose.yml").is_file(),
+        ))
+    _project_cache = projects
+    _project_cache_time = now
+    return projects
+
+
+_system_prompt_cache: str | None = None
+_system_prompt_cache_time: float = 0.0
+
+
 def _build_system_prompt() -> str:
-    return _SYSTEM_PROMPT.format(
+    global _system_prompt_cache, _system_prompt_cache_time
+    now = time.monotonic()
+    if _system_prompt_cache is not None and now - _system_prompt_cache_time < _PROJECT_CACHE_TTL:
+        return _system_prompt_cache
+
+    projects = _scan_projects()
+    if projects:
+        project_list = ", ".join(p.name for p in projects)
+    else:
+        project_list = "(none detected)"
+    result = _SYSTEM_PROMPT.format(
+        assistant_name=settings.assistant_name,
+        project_list=project_list,
         allowed_targets=", ".join(sorted(ALLOWED_TARGETS)),
         allowed_env_keys=", ".join(sorted(ALLOWED_ENV_KEYS)),
     )
+    _system_prompt_cache = result
+    _system_prompt_cache_time = now
+    return result
 
 
 def _stream_gemini(system_prompt: str, contents: list[dict]) -> Generator[str, None, None]:
@@ -242,10 +299,9 @@ def _stream_gemini(system_prompt: str, contents: list[dict]) -> Generator[str, N
             method="POST",
         )
         try:
-            ca_bundle = _resolve_ca_bundle()
-            if ca_bundle:
-                context = ssl.create_default_context(cafile=ca_bundle)
-                resp = request.urlopen(req_obj, timeout=timeout, context=context)
+            ssl_ctx = _get_ssl_context()
+            if ssl_ctx:
+                resp = request.urlopen(req_obj, timeout=timeout, context=ssl_ctx)
             else:
                 resp = request.urlopen(req_obj, timeout=timeout)
 
@@ -302,39 +358,177 @@ def _stream_gemini(system_prompt: str, contents: list[dict]) -> Generator[str, N
     raise last_error or RuntimeError("All Gemini locations failed")
 
 
-def _extract_plan_from_reply(text: str) -> tuple[str, ChatPlan | None]:
-    """Extract plan JSON from reply text, return (clean_reply, plan_or_none)."""
-    pattern = r"```json\s*(\{.*?\})\s*```"
-    match = re.search(pattern, text, re.DOTALL)
+def _extract_plan_from_reply(
+    text: str,
+) -> tuple[str, ChatPlan | None, list[ChatPlan] | None, list[ChatChoice] | None, list[ProjectInfo] | None]:
+    """Extract plan/plans/choices/project_select JSON from reply text.
 
-    plan_json: dict | None = None
+    Returns (clean_reply, single_plan, multi_plans, choices, project_select).
+    """
+    match = _RE_JSON_BLOCK.search(text)
+
+    parsed: dict | None = None
     if match:
         try:
-            plan_json = json.loads(match.group(1))
+            parsed = json.loads(match.group(1))
         except json.JSONDecodeError:
             pass
 
-    if not plan_json:
-        # Try _extract_json from chatbot module as fallback
+    if not parsed:
         extracted = _extract_json(text)
-        if extracted and extracted.get("plan_ready"):
-            plan_json = extracted
+        if extracted:
+            parsed = extracted
 
-    if not plan_json or not plan_json.get("plan_ready"):
-        return text, None
-
-    # Validate via chatbot _coerce_plan
-    try:
-        target, env, _ = _coerce_plan(plan_json)
-    except RuntimeError:
-        return text, None
+    if not parsed:
+        return text, None, None, None, None
 
     # Remove the JSON block from the displayed reply
-    clean_reply = re.sub(r"```json\s*\{.*?\}\s*```", "", text, flags=re.DOTALL).strip()
+    clean_reply = _RE_JSON_BLOCK_STRIP.sub("", text).strip()
+
+    # ── Project select (no plan_ready) ──
+    if parsed.get("project_select") and not parsed.get("plan_ready"):
+        projects = _scan_projects()
+        if not clean_reply:
+            clean_reply = parsed.get("message", "어떤 프로젝트를 검사할까요?")
+        return clean_reply, None, None, None, projects if projects else None
+
+    # ── Choices (no plan_ready) ──
+    if "choices" in parsed and not parsed.get("plan_ready"):
+        raw_choices = parsed["choices"]
+        if isinstance(raw_choices, list):
+            choices = []
+            for c in raw_choices:
+                if isinstance(c, dict) and c.get("label") and c.get("value"):
+                    choices.append(ChatChoice(
+                        label=str(c["label"]),
+                        description=str(c.get("description", "")),
+                        value=str(c["value"]),
+                    ))
+            if choices:
+                return clean_reply or "Please choose an option:", None, None, choices, None
+        return text, None, None, None, None
+
+    # Needs plan_ready for execution
+    if not parsed.get("plan_ready"):
+        return text, None, None, None, None
+
+    # ── Multi plans ──
+    if "plans" in parsed and isinstance(parsed["plans"], list):
+        plans: list[ChatPlan] = []
+        for p in parsed["plans"]:
+            if not isinstance(p, dict):
+                continue
+            try:
+                target, env, _ = _coerce_plan(p)
+                plans.append(ChatPlan(
+                    target=target,
+                    env=env,
+                    label=str(p.get("label", "")),
+                ))
+            except RuntimeError:
+                continue
+        if plans:
+            if not clean_reply:
+                labels = ", ".join(p.label or p.target for p in plans)
+                clean_reply = f"Ready to execute **{len(plans)} plans**: {labels}"
+            return clean_reply, None, plans, None, None
+
+    # ── Single plan (backward compat) ──
+    try:
+        target, env, _ = _coerce_plan(parsed)
+    except RuntimeError:
+        return text, None, None, None, None
+
     if not clean_reply:
         clean_reply = f"Ready to execute **{target}**."
 
-    return clean_reply, ChatPlan(target=target, env=env)
+    return clean_reply, ChatPlan(target=target, env=env), None, None, None
+
+
+def _apply_action_gate(
+    history: list,
+    reply: str,
+    plan: ChatPlan | None,
+    plans: list[ChatPlan] | None,
+    choices: list[ChatChoice] | None,
+    project_select: list[ProjectInfo] | None,
+) -> tuple[str, ChatPlan | None, list[ChatPlan] | None, list[ChatChoice] | None, list[ProjectInfo] | None]:
+    """Strip premature action JSON when the conversation has no prior turns.
+
+    Gemini sometimes ignores the clarification-first system prompt and emits
+    plan / project_select on the very first user message.  This gate blocks
+    those actions unless the plan already contains a non-empty FOCUS (meaning
+    the user was specific enough).  Choices are never blocked — they *are* the
+    clarification mechanism.
+    """
+    # Fast path: nothing to gate
+    if plan is None and plans is None and project_select is None:
+        return reply, plan, plans, choices, project_select
+
+    user_turns = sum(1 for msg in history if msg.role == "user")
+
+    # After at least one round-trip, allow everything
+    if user_turns >= 1:
+        return reply, plan, plans, choices, project_select
+
+    # First turn (user_turns == 0): block unless FOCUS is present
+    def _has_focus(p: ChatPlan) -> bool:
+        return bool(p.env.get("FOCUS", "").strip())
+
+    if plan is not None and _has_focus(plan):
+        return reply, plan, plans, choices, project_select
+
+    if plans is not None and all(_has_focus(p) for p in plans):
+        return reply, plan, plans, choices, project_select
+
+    # Gate: strip action payloads, keep choices and text reply
+    logger.info("action_gate: blocked premature action on first turn (user_turns=0)")
+    return reply, None, None, choices, None
+
+
+def _inject_project_select(
+    reply: str,
+    plan: ChatPlan | None,
+    plans: list[ChatPlan] | None,
+    choices: list[ChatChoice] | None,
+    project_select: list[ProjectInfo] | None,
+) -> tuple[str, ChatPlan | None, list[ChatPlan] | None, list[ChatChoice] | None, list[ProjectInfo] | None]:
+    """Force project_select when Gemini lists project names as plain text.
+
+    Gemini sometimes ignores the instruction to emit ``project_select`` JSON
+    and instead dumps project names inline.  Detect this by checking whether
+    the reply text mentions several known project names — if so, replace
+    the text listing with a proper project picker payload.
+    """
+    # Skip if an action is already attached
+    if plan or plans or choices or project_select:
+        return reply, plan, plans, choices, project_select
+
+    projects = _scan_projects()
+    if not projects:
+        return reply, plan, plans, choices, project_select
+
+    names = [p.name for p in projects]
+    matched = [n for n in names if n in reply]
+    # Threshold: if 4+ project names appear in the reply, it's a listing
+    if len(matched) < 4:
+        return reply, plan, plans, choices, project_select
+
+    # Strip the project list from the reply text
+    logger.info("inject_project_select: detected %d project names in text, injecting picker", len(matched))
+    # Remove lines that are just project name listings (comma-separated or bullet)
+    clean_lines: list[str] = []
+    for line in reply.split("\n"):
+        # Skip lines where most content is project names
+        line_matched = sum(1 for n in names if n in line)
+        if line_matched >= 3:
+            continue
+        clean_lines.append(line)
+    clean_reply = "\n".join(clean_lines).strip()
+    if not clean_reply:
+        clean_reply = "어떤 프로젝트를 대상으로 진행할까요?"
+
+    return clean_reply, None, None, None, projects
 
 
 # ── Endpoints ────────────────────────────────────────────────────────
@@ -358,9 +552,20 @@ def _persist_message(
     role: str,
     content: str,
     plan: ChatPlan | None = None,
+    plans: list[ChatPlan] | None = None,
+    choices: list[ChatChoice] | None = None,
+    project_select: list[ProjectInfo] | None = None,
     run_id: str | None = None,
 ) -> None:
-    plan_dict = {"target": plan.target, "env": plan.env} if plan else None
+    plan_dict: dict | None = None
+    if plan:
+        plan_dict = {"target": plan.target, "env": plan.env, "label": plan.label}
+    elif plans:
+        plan_dict = {"plans": [{"target": p.target, "env": p.env, "label": p.label} for p in plans]}
+    elif choices:
+        plan_dict = {"choices": [{"label": c.label, "description": c.description, "value": c.value} for c in choices]}
+    elif project_select:
+        plan_dict = {"project_select": [p.model_dump() for p in project_select]}
     db.add(ChatMessageRow(
         conversation_id=conversation_id,
         role=role,
@@ -393,17 +598,23 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         logger.error("Gemini call failed: %s", exc)
         raise HTTPException(status_code=503, detail=f"LLM call failed: {exc}")
 
-    reply, plan = _extract_plan_from_reply(raw_reply)
+    reply, plan, plans, choices, project_select = _extract_plan_from_reply(raw_reply)
+    reply, plan, plans, choices, project_select = _apply_action_gate(
+        req.history, reply, plan, plans, choices, project_select,
+    )
+    reply, plan, plans, choices, project_select = _inject_project_select(
+        reply, plan, plans, choices, project_select,
+    )
 
     # Persist to DB
     conv = _ensure_conversation(db, req.conversation_id)
     if not conv.title and req.message:
         conv.title = req.message[:100]
     _persist_message(db, conv.id, "user", req.message)
-    _persist_message(db, conv.id, "assistant", reply, plan=plan)
+    _persist_message(db, conv.id, "assistant", reply, plan=plan, plans=plans, choices=choices, project_select=project_select)
     db.commit()
 
-    return ChatResponse(reply=reply, plan=plan)
+    return ChatResponse(reply=reply, plan=plan, plans=plans, choices=choices, project_select=project_select)
 
 
 @router.post("/chat/stream")
@@ -429,6 +640,7 @@ def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> StreamingRes
     _persist_message(db, conv.id, "user", req.message)
     db.commit()
     conv_id = conv.id
+    history_for_gate = req.history
 
     def generate() -> Generator[str, None, None]:
         full_text = ""
@@ -444,11 +656,27 @@ def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> StreamingRes
             yield "data: [DONE]\n\n"
             return
 
-        # After streaming completes, check for plan in the full response
-        reply, plan = _extract_plan_from_reply(full_text)
+        # After streaming completes, check for plan/plans/choices/project_select in the full response
+        reply, plan, plans, choices, project_select = _extract_plan_from_reply(full_text)
+        reply, plan, plans, choices, project_select = _apply_action_gate(
+            history_for_gate, reply, plan, plans, choices, project_select,
+        )
+        reply, plan, plans, choices, project_select = _inject_project_select(
+            reply, plan, plans, choices, project_select,
+        )
         done_payload: dict[str, Any] = {"type": "done", "full_reply": reply}
         if plan:
-            done_payload["plan"] = {"target": plan.target, "env": plan.env}
+            done_payload["plan"] = {"target": plan.target, "env": plan.env, "label": plan.label}
+        if plans:
+            done_payload["plans"] = [
+                {"target": p.target, "env": p.env, "label": p.label} for p in plans
+            ]
+        if choices:
+            done_payload["choices"] = [
+                {"label": c.label, "description": c.description, "value": c.value} for c in choices
+            ]
+        if project_select:
+            done_payload["project_select"] = [p.model_dump() for p in project_select]
         yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
@@ -456,7 +684,7 @@ def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> StreamingRes
         try:
             persist_db = SessionLocal()
             try:
-                _persist_message(persist_db, conv_id, "assistant", reply, plan=plan)
+                _persist_message(persist_db, conv_id, "assistant", reply, plan=plan, plans=plans, choices=choices, project_select=project_select)
                 persist_db.commit()
             finally:
                 persist_db.close()
@@ -471,6 +699,14 @@ def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> StreamingRes
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ── Projects ─────────────────────────────────────────────────────────
+
+
+@router.get("/projects", response_model=list[ProjectInfo])
+def list_projects() -> list[ProjectInfo]:
+    return _scan_projects()
 
 
 # ── Conversations ────────────────────────────────────────────────────

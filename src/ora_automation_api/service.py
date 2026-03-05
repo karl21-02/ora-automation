@@ -193,12 +193,14 @@ def _run_with_heartbeat(
     cancelled = False
     paused = False
 
+    sleep_interval = 0.1  # start fast for responsive cancellation
     while True:
         if proc.poll() is not None:
             break
 
         now = time.monotonic()
-        if now - started > max(1.0, timeout_seconds):
+        elapsed = now - started
+        if elapsed > max(1.0, timeout_seconds):
             timed_out = True
             _terminate_process(proc)
             break
@@ -219,7 +221,14 @@ def _run_with_heartbeat(
             db.commit()
             next_heartbeat = now + max(0.5, settings.heartbeat_interval_seconds)
 
-        time.sleep(0.2)
+        # Adaptive sleep: fast early (responsive cancel), slower when stable
+        if elapsed < 5.0:
+            sleep_interval = 0.1
+        elif elapsed < 30.0:
+            sleep_interval = 0.5
+        else:
+            sleep_interval = 1.0
+        time.sleep(sleep_interval)
 
     stdout, stderr = proc.communicate()
     return CommandOutcome(

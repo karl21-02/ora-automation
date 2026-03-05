@@ -1,51 +1,160 @@
 # ora-automation
 
-`ora-automation`는 `Ora` 메인 서버와 분리된 다중 에이전트형 자동화 루트입니다.
-현재는 R&D 자동화(기존 엔진)와 E2E 자동화를 같은 루트에서 관리합니다.
+Multi-Agent R&D Research Orchestrator / 멀티 에이전트 R&D 리서치 오케스트레이터
 
-## 자동화 항목 구조
+`ora-automation`은 Ora 프로젝트 워크스페이스를 스캔하고, 다중 에이전트 토론(스코어링, 디베이트, 컨센서스)을 수행하여 구조화된 리서치 리포트를 생성하는 자동화 플랫폼입니다. CLI, REST API, 또는 챗봇 UI를 통해 오케스트레이션을 실행할 수 있습니다.
 
-- `automations/research`: R&D 전략 생성·토론·검증 결과 축적
-- `automations/e2e`: 서비스별 E2E 오케스트레이션 가이드(`automations/e2e/services`)
-- `automations/qa`: 향후 QA 자동화(리포트/회귀/게이트) 전개 예정
+## Table of Contents / 목차
 
-각 세부 규칙은 각 하위 폴더의 README를 참고하세요.
-현재 오케스트레이션은 `CEO / Planner / Developer` 3명의 협업 에이전트로 설계되어 있습니다.
+- [Architecture / 아키텍처](#architecture--아키텍처)
+- [Tech Stack / 기술 스택](#tech-stack--기술-스택)
+- [Project Structure / 프로젝트 구조](#project-structure--프로젝트-구조)
+- [Quick Start / 빠른 시작](#quick-start--빠른-시작)
+- [Running with Docker Compose / Docker 실행](#running-with-docker-compose--docker-실행)
+- [CLI Usage / CLI 사용법](#cli-usage--cli-사용법)
+- [Makefile Targets / Make 타깃](#makefile-targets--make-타깃)
+- [Agent Persona System / 에이전트 페르소나 시스템](#agent-persona-system--에이전트-페르소나-시스템)
+- [Research Source Verification / 리서치 소스 검증](#research-source-verification--리서치-소스-검증)
+- [E2E Testing / E2E 테스트](#e2e-testing--e2e-테스트)
+- [QA Program / QA 프로그램](#qa-program--qa-프로그램)
+- [Output / 출력물](#output--출력물)
+- [Environment Variables / 환경변수](#environment-variables--환경변수)
+- [Documentation / 문서](#documentation--문서)
 
-- **CEO**: 시장성/수주성/사업성 중심의 점수 산정
-- **Planner**: 사용자 체감 품질·업무 확장성·로드맵 적합성 중심의 점수 산정
-- **Developer**: 기존 파이프라인 재사용성, 구현 난이도, 단기 실현성 중심의 점수 산정
+## Architecture / 아키텍처
 
-## 구성
+```
+┌─────────────────┐     ┌──────────────┐     ┌────────────┐
+│  React UI       │────>│  FastAPI      │────>│ PostgreSQL │
+│  (Vite, :5173)  │     │  (:8000)      │     │  (:5432)   │
+└─────────────────┘     └──────┬───────┘     └────────────┘
+                               │
+                        ┌──────┴───────┐
+                        │   RabbitMQ   │
+                        │  (:5672)     │
+                        └──────┬───────┘
+              ┌────────────────┼────────────────┐
+              ▼                ▼                 ▼
+         worker-ceo     worker-pm     worker-{researcher,engineer,qa}
+              │                │                 │
+              └────────────────┼────────────────┘
+                               ▼
+                     Google Gemini (Vertex AI)
+                               ▼
+                     Research Reports (MD + JSON)
+```
 
-- `src/ora_rd_orchestrator/engine.py`
-  - 워크스페이스 스캔, 토픽 점수 산정, 에이전트 랭킹 산출, 보고서 생성
-- `src/ora_rd_orchestrator/cli.py`
-  - CLI 진입점
-- `scripts/run_collaboration_cycle.sh`
-  - 반복 실행 러너(과거 보고서 자동 반영 + 실전 웹 검증 자동 실행)
-- `scripts/verify_sources.py`
-  - 실전 웹 검증기(연구 출처 URL 상태 실시간 확인, arXiv API 교차 검증, 재시도)
-- `Makefile`
-  - 원클릭 실행 타깃
-- `research_reports/`
-  - 과거 보고서 템플릿/소스(샘플 V9) 보관
+9개 서비스(PostgreSQL, RabbitMQ, FastAPI, React Frontend, 5 Agent Workers)가 Docker Compose로 오케스트레이션됩니다.
 
-## FastAPI + Postgres + RabbitMQ + Docker Compose
+상세 아키텍처 문서: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
-FastAPI는 요청을 수신하고 Job을 enqueue하며, RabbitMQ 기반 멀티 에이전트 워커가 실제 `make` 타깃(`run-cycle`, `run-loop`, `e2e-service` 등)을 실행합니다.
+## Tech Stack / 기술 스택
 
-- `api`: 제어면(Control Plane), 요청/조회
-- `worker-ceo` / `worker-pm` / `worker-researcher` / `worker-engineer` / `worker-qa`
-- `db`: 실행 이력/의사결정/이벤트 저장
-- `rabbitmq`: main/retry/dlq 큐 라우팅
+| Component / 구성 요소 | Technology / 기술 | Version / 버전 |
+|---|---|---|
+| Backend | Python, FastAPI, SQLAlchemy 2, Pydantic 2 | 3.10+ / 0.115+ |
+| Frontend | React, TypeScript, Vite | 19 / 5.9 / 7.3 |
+| Database | PostgreSQL | 16 |
+| Message Queue | RabbitMQ | 3.13 |
+| LLM | Google Gemini (Vertex AI) | 2.5-flash |
+| Container | Docker Compose | - |
 
-### 빠른 시작
+## Project Structure / 프로젝트 구조
+
+```
+ora-automation/
+├── src/
+│   ├── ora_rd_orchestrator/      # Core orchestration engine / 핵심 오케스트레이션 엔진
+│   │   ├── pipeline.py           # Main pipeline: generate_report()
+│   │   ├── cli.py                # CLI entry point / CLI 진입점
+│   │   ├── config.py             # Constants, env vars, profiles
+│   │   ├── types.py              # All dataclasses
+│   │   ├── llm_client.py         # LLM subprocess wrapper
+│   │   ├── llm_provider.py       # LLM interface abstraction
+│   │   ├── gemini_provider.py    # Google Gemini implementation
+│   │   ├── workspace.py          # File scanning, analyze_workspace()
+│   │   ├── topic_discovery.py    # LLM topic discovery + fallback
+│   │   ├── scoring.py            # Multi-agent scoring + legacy formula
+│   │   ├── deliberation.py       # Multi-round debate / 다중 라운드 토론
+│   │   ├── consensus.py          # Final consensus + hard gates
+│   │   ├── research.py           # ArXiv/Crossref/OpenAlex clients
+│   │   ├── web_sources.py        # Web scraping utilities
+│   │   ├── report_builder.py     # Markdown + JSON report generation
+│   │   ├── chatbot.py            # Gemini chatbot interface
+│   │   ├── personas.py           # PersonaRegistry (20 YAML personas)
+│   │   ├── personas/             # 20 YAML agent definitions
+│   │   ├── agent/                # Agent module
+│   │   └── engine.py             # Legacy monolith (~4600 lines, backward compat)
+│   │
+│   └── ora_automation_api/       # FastAPI backend / FastAPI 백엔드
+│       ├── main.py               # App entry, router registration
+│       ├── chat_router.py        # Chat + conversations + reports + projects
+│       ├── schemas.py            # Pydantic request/response models
+│       ├── models.py             # SQLAlchemy ORM models
+│       ├── database.py           # DB session management
+│       ├── config.py             # API settings (env vars)
+│       ├── service.py            # Run execution logic
+│       ├── queue.py              # RabbitMQ message routing
+│       ├── worker.py             # Agent worker process
+│       └── llm_planner.py        # LLM plan adapter
+│
+├── frontend/                     # React + Vite SPA
+│   └── src/
+│       ├── App.tsx               # Main app (conversation state)
+│       ├── components/
+│       │   ├── Sidebar.tsx       # Conversation list, search, date groups
+│       │   ├── ChatWindow.tsx    # Message display + input
+│       │   ├── MessageBubble.tsx # Single message rendering
+│       │   └── ProjectSelectCard.tsx # Project selection UI
+│       ├── lib/
+│       │   ├── api.ts            # Typed API client
+│       │   └── constants.ts      # App constants
+│       └── types.ts              # Shared TypeScript types
+│
+├── scripts/                      # Shell + Python utilities
+├── automations/                  # Orchestration configs (research, e2e, qa)
+├── research_reports/             # Output directory / 출력 디렉토리
+├── docs/                         # Documentation / 문서
+│   ├── ARCHITECTURE.md           # Architecture document / 아키텍처 문서
+│   └── API_REFERENCE.md          # API reference / API 레퍼런스
+├── Makefile                      # 30+ targets (primary build tool)
+├── docker-compose.yml            # 9-service stack
+├── pyproject.toml                # Python package metadata
+└── Dockerfile                    # Python 3.11-slim + system deps
+```
+
+## Quick Start / 빠른 시작
+
+### Prerequisites / 사전 준비
+
+- Python 3.10+
+- Docker & Docker Compose
+- Node.js 18+ (프론트엔드 로컬 개발 시)
+- GCP Service Account JSON (Gemini API용)
+
+### Setup / 설정
 
 ```bash
-cd /Users/mike/workspace/side_project/Ora/ora-automation
+# 1) Python 환경 설정
+make setup                  # .venv 생성 + pip install -e .
 
-# API + DB + RabbitMQ + 멀티 에이전트 워커 기동
+# 2) 환경변수 확인 (Gemini)
+# google-service-account.json이 프로젝트 루트에 있어야 합니다
+# Makefile 기본값으로 GOOGLE_CLOUD_PROJECT_ID, GEMINI_MODEL 등이 설정됩니다
+
+# 3) 1회 R&D 분석 실행
+make run
+
+# 4) 반복 러너 실행
+make run-cycle
+```
+
+## Running with Docker Compose / Docker 실행
+
+전체 스택(API + DB + RabbitMQ + 에이전트 워커 + 프론트엔드)을 한 번에 기동합니다.
+
+```bash
+# 전체 서비스 기동
 make api-up
 
 # 상태 확인
@@ -54,344 +163,215 @@ make api-health
 
 # 로그 확인
 make api-logs
-```
 
-### API 호출 예시
-
-```bash
-# 1) run-cycle 실행 요청
-curl -sS -X POST http://localhost:8000/api/v1/orchestrations \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "user_prompt": "V10 R&D 리서치 1회 실행",
-    "target": "run-cycle",
-    "env": {
-      "RUN_CYCLES": "1",
-      "VERIFY_ROUNDS": "3",
-      "TOP": "6"
-    }
-  }'
-
-# 2) e2e-service 실행 요청 (B2C)
-curl -sS -X POST http://localhost:8000/api/v1/orchestrations \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "user_prompt": "B2C E2E 실행",
-    "target": "e2e-service",
-    "env": {
-      "SERVICE": "b2c",
-      "E2E_TOOL": "playwright",
-      "E2E_SERVICE_MODE": "run"
-    }
-  }'
-
-# 3) 최근 실행 목록 조회
-curl -sS "http://localhost:8000/api/v1/orchestrations?limit=10"
-
-# 4) 단건 조회 (run_id 교체)
-curl -sS "http://localhost:8000/api/v1/orchestrations/<run_id>"
-```
-
-`stdout/stderr`는 `research_reports/api_runs/<run_id>/`에 저장됩니다.
-
-### 운영 액션 API
-
-```bash
-# pause
-curl -sS -X POST http://localhost:8000/api/v1/orchestrations/<run_id>/pause
-
-# resume (queued로 전환 후 재-enqueue)
-curl -sS -X POST http://localhost:8000/api/v1/orchestrations/<run_id>/resume
-
-# cancel
-curl -sS -X POST http://localhost:8000/api/v1/orchestrations/<run_id>/cancel
-
-# stage/event 로그 조회
-curl -sS "http://localhost:8000/api/v1/orchestrations/<run_id>/events?limit=200"
-
-# 토론/합의 의사결정 객체 조회
-curl -sS "http://localhost:8000/api/v1/orchestrations/<run_id>/decision"
-```
-
-### LLM 플래너 API (자연어 -> 실행 계획 -> 실행)
-
-`api` 컨테이너 환경변수에 플래너 커맨드를 넣으면 활성화됩니다.
-
-```bash
-export ORA_AUTOMATION_LLM_PLANNER_CMD='python /workspace/Ora/ora-automation/scripts/llm_planner_adapter.py'
-docker compose up -d --build
-curl -sS http://localhost:8000/health
-```
-
-- `llm_planner_configured: true`면 사용 가능
-
-```bash
-# 1) 계획만 생성
-curl -sS -X POST http://localhost:8000/api/v1/plan \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "prompt":"B2C 서비스 E2E를 playwright로 한 번 실행하고 실패하면 재시도 전략을 포함해 계획해줘",
-    "context":{"service":"b2c"}
-  }'
-
-# 2) 계획 생성 + 즉시 실행 enqueue
-curl -sS -X POST http://localhost:8000/api/v1/orchestrations/from-plan \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "prompt":"OraServer와 OraAiServer를 포함한 R&D 리서치 run-cycle 1회 실행",
-    "context":{"services":["telecom","ai"]},
-    "idempotency_key":"plan-run-001"
-  }'
-```
-
-### 중지/초기화
-
-```bash
-# 컨테이너만 중지
+# 중지
 make api-down
 
 # DB 볼륨까지 초기화
 make api-reset
 ```
 
-## 실전 웹 검증기 (research_sources.json 자동 갱신기)
+### Services / 서비스 목록
 
-`research_sources.json`은 주제별 출처 URL 목록입니다.
-`verify_sources.py`는 아래를 수행합니다.
+| Service | Container | Port | Description / 설명 |
+|---|---|---|---|
+| `db` | ora-automation-db | 5432 | PostgreSQL 16 (실행 이력, 대화, 의사결정 저장) |
+| `rabbitmq` | ora-automation-rabbitmq | 5672, 15672 | 메시지 브로커 (main/retry/dlq 큐 라우팅) |
+| `api` | ora-automation-api | 8000 | FastAPI 제어면 (REST + SSE 스트리밍) |
+| `frontend` | ora-automation-frontend | 5173 | React 챗봇 UI (Nginx 서빙) |
+| `worker-ceo` | ora-automation-worker-ceo | - | CEO 에이전트 워커 |
+| `worker-pm` | ora-automation-worker-pm | - | PM 에이전트 워커 |
+| `worker-researcher` | ora-automation-worker-researcher | - | Researcher 에이전트 워커 |
+| `worker-engineer` | ora-automation-worker-engineer | - | Engineer 에이전트 워커 |
+| `worker-qa` | ora-automation-worker-qa | - | QA 에이전트 워커 |
 
-- URL 접근 확인(HTTP 상태)
-- 응답 지연/최종 URL/타이틀 수집
-- arXiv 링크는 API로 논문 존재 여부 교차 검증(`verified_by_arxiv_api`)
-- DOI/학술 링크는 `Crossref API`, `OpenAlex API` fallback 검증으로 오탐/사라진 논문을 걸러냄
-- 미검증 항목 재시도(`--rounds`, `--retry-delay`)
-- 검사 결과를 `sources[].status`에 반영하고 `validation` 요약 저장
-
-### 검색 전략(왜 API 기반인지)
-
-- **arXiv/Crossref/OpenAlex API 우선**: 메타데이터 신뢰도 높은 구조화 응답을 받으므로, 제목/저자/발행 연도 검증 정확도가 높고 크롤러보다 일관적입니다.
-- **공식 페이지는 웹 fallback**: 최신 공지/문서/벤더 페이지는 API에 안 잡히는 경우가 많아 검색 포털·공식 홈페이지 링크를 보조로 수집합니다.
-- **무료 API 정책 대응**: 과도 사용 시 rate-limit/429가 발생할 수 있어, `VERIFY_SCOPE` 반복, 타임아웃 조절, provider toggle로 비용·오탐·지연을 제어합니다.
-- **크롤러와의 차이**: 크롤러는 최신 UI/텍스트를 볼 수 있지만 반응형 DOM/차단 정책에 민감해 재현성이 낮습니다. 현재 구조는 API(근거형) + 웹 접근성 확인(보조)로 운영 안정성을 우선합니다.
-
-관련 환경변수(오케스트레이션/엔진 공통)
-
-- `ORA_RD_RESEARCH_ARXIV_SEARCH`, `ORA_RD_RESEARCH_CROSSREF_SEARCH`, `ORA_RD_RESEARCH_OPENALEX_SEARCH` (`1`/`0`)
-- `ORA_RD_RESEARCH_SEARCH_TIMEOUT`, `ORA_RD_RESEARCH_ARXIV_SEARCH_MAX_RESULTS`, `ORA_RD_RESEARCH_CROSSREF_SEARCH_MAX_RESULTS`, `ORA_RD_RESEARCH_OPENALEX_SEARCH_MAX_RESULTS`
-- `ORA_RD_RESEARCH_CROSSREF_SEARCH_TIMEOUT`, `ORA_RD_RESEARCH_OPENALEX_SEARCH_TIMEOUT`
-- 하위호환: `ORA_RD_ARXIV_SEARCH_ENABLED`, `ORA_RD_ARXIV_SEARCH_MAX_RESULTS`, `ORA_RD_ARXIV_SEARCH_TIMEOUT`
-
-## 원클릭 실행 방법 (Makefile)
+## CLI Usage / CLI 사용법
 
 ```bash
-cd /Users/mike/workspace/side_project/Ora/ora-automation
-
-# 1) 최초 셋업
-make setup
-
-# 1-b) Gemini(Vertex + Service Account) 기본값 확인
-# Makefile 기본값:
-#   GOOGLE_CLOUD_PROJECT_ID=ora-project-474413
-#   GOOGLE_CLOUD_LOCATION=us-central1
-#   GEMINI_MODEL=gemini-2.5-flash-lite
-#   GOOGLE_APPLICATION_CREDENTIALS=/Users/mike/workspace/side_project/Ora/ora-automation/google-service-account.json
-# 필요 시만 경로 override:
-# export GOOGLE_APPLICATION_CREDENTIALS=/your/path/google-service-account.json
-
-# 2) 1회 분석 실행
-make run
-
-# 2-b) 한 개 전략만 뽑는 실행(요청한 형식에 맞춤)
-make run-single FOCUS=OraB2bAndroid VERSION_TAG=V10
-
-# 2-b) 포커스 라벨 지정 실행 (예: OraB2bAndroid)
-make run-focus FOCUS=OraB2bAndroid VERSION_TAG=V10
-
-# 3) 반복 러너(기본값 V10_자동회차)
-make run-cycle
-
-# 3-b) 반복 러너 + 에이전트 토론 라운드 강화(예: 4회)
-make run-cycle DEBATE_ROUNDS=4
-
-# 4) 반복 러너 + 다중 검증 라운드(기본 3회)
-make run-cycle-verify VERIFY_ROUNDS=3
-
-# 4-b) 딥 모드 반복 러너(확장 스캔 + 강한 검증)
-make run-cycle-deep RUN_CYCLES=3 VERIFY_ROUNDS=5
-
-# 4-c) 논문 소스 신뢰도 강화(공식 API만 사용)
-make run-cycle DEBATE_ROUNDS=3 ORA_RD_RESEARCH_CROSSREF_SEARCH=1 ORA_RD_RESEARCH_OPENALEX_SEARCH=1 ORA_RD_RESEARCH_SEARCH_TIMEOUT=10
-
-# 4-d) 특정 provider만 끌 때 (예: arXiv만)
-make run-cycle ORA_RD_RESEARCH_ARXIV_SEARCH=1 ORA_RD_RESEARCH_CROSSREF_SEARCH=0 ORA_RD_RESEARCH_OPENALEX_SEARCH=0
-
-# 5) 반복 횟수 증가해 더 끈질기게 수행
-make run-loop RUN_CYCLES=3 VERIFY_ROUNDS=4
-make run-loop RUN_CYCLES=3 VERIFY_ROUNDS=4 DEBATE_ROUNDS=4
-
-# Docker 실행
-make docker-build
-make docker-run TOP=1 OUTPUT_DIR=/tmp/ora-rd-docker
-make docker-run-cycle RUN_CYCLES=2 VERIFY_ROUNDS=3
-make docker-run-loop RUN_CYCLES=3 DEBATE_ROUNDS=3
-
-# 6) 존재 소스 파일만 검증
-make verify-sources VERIFY_SOURCE_FILES="/Users/mike/workspace/side_project/Ora/ora-automation/research_reports/V9_대화흐름혁신_업무자동화_신뢰성강화/research_sources.json"
-```
-
-### 실행 파라미터 오버라이드
-
-```bash
-make run TOP=5 WORKSPACE=/Users/mike/workspace/side_project/Ora OUTPUT_DIR=/tmp/ora-research-output
-make run-focus FOCUS=OraB2bAndroid VERSION_TAG=V10 KEEP_LAST_RUNS=4 RUN_NAME=V10_안드로이드
-make run-single FOCUS=OraB2bAndroid VERSION_TAG=V10
-```
-
-## 수동 실행
-
-```bash
+# 기본 실행 (TOP 6개 전략, 2라운드 토론)
 python3 src/ora_rd_orchestrator/cli.py \
-  --workspace /Users/mike/workspace/side_project/Ora \
-  --output-dir /Users/mike/workspace/side_project/Ora/ora-automation/research_reports/runs/manual \
+  --workspace /path/to/Ora \
+  --output-dir ./research_reports/runs/manual \
   --output-name rd_research_report_$(date +%Y%m%d_%H%M%S) \
   --top 6 \
   --debate-rounds 3
 
-# 한 개 전략 단위 리포트
+# 단일 전략 포커스 리포트
 python3 src/ora_rd_orchestrator/cli.py \
-  --workspace /Users/mike/workspace/side_project/Ora \
-  --output-dir /Users/mike/workspace/side_project/Ora/ora-automation/research_reports/runs/manual \
+  --workspace /path/to/Ora \
+  --output-dir ./research_reports/runs/manual \
   --output-name rd_research_report_$(date +%Y%m%d_%H%M%S) \
   --single-strategy \
   --focus OraB2bAndroid \
   --version-tag V10
 ```
 
-러너 실행 예:
+## Makefile Targets / Make 타깃
+
+### R&D Analysis / R&D 분석
+
+| Command | Description / 설명 |
+|---|---|
+| `make run` | 1회 R&D 분석 (TOP=6, DEBATE_ROUNDS=2) |
+| `make run-cycle` | 반복 러너 + 소스 검증 |
+| `make run-cycle-deep` | 확장 스캔 + 강한 검증 (TOP=8, MAX_FILES=2400) |
+| `make run-focus FOCUS=<label>` | 특정 전략 포커스 분석 |
+| `make run-single FOCUS=<label>` | 단일 전략 리포트 |
+| `make run-loop RUN_CYCLES=N` | N회 반복 실행 |
+
+### E2E & QA
+
+| Command | Description / 설명 |
+|---|---|
+| `make e2e-service SERVICE=<name>` | 서비스별 E2E 테스트 |
+| `make e2e-service-all` | 전체 서비스 E2E 실행 |
+| `make qa-program` | QA 파이프라인 실행 + 리포트 생성 |
+| `make verify-sources` | 리서치 소스 URL 검증 |
+
+### Infrastructure / 인프라
+
+| Command | Description / 설명 |
+|---|---|
+| `make setup` | Python venv 생성 + 의존성 설치 |
+| `make api-up` | Docker Compose 전체 기동 |
+| `make api-down` | Docker 서비스 중지 |
+| `make api-reset` | Docker 중지 + DB 볼륨 삭제 |
+| `make api-logs` | Docker 로그 추적 |
+| `make api-health` | 헬스체크 |
+| `make frontend-dev` | 프론트엔드 개발 서버 (:5173) |
+| `make frontend-build` | 프론트엔드 프로덕션 빌드 |
+
+### Parameter Override / 파라미터 오버라이드
 
 ```bash
-cd /Users/mike/workspace/side_project/Ora/ora-automation
-bash scripts/run_collaboration_cycle.sh
+make run TOP=5 WORKSPACE=/path/to/Ora OUTPUT_DIR=/tmp/output
+make run-cycle DEBATE_ROUNDS=4
+make run-cycle-deep RUN_CYCLES=3 VERIFY_ROUNDS=5
 ```
 
-## 출력
+## Agent Persona System / 에이전트 페르소나 시스템
 
-- Markdown: `rd_research_report_YYYYmmdd_HHMMSS.md`
-- JSON: `rd_research_report_YYYYmmdd_HHMMSS.json`
-- Sources: `research_sources.json` (실행 폴더 내 생성, 검증 상태 자동 갱신)
-- 반복 결과(기본): `research_reports/V10_자동회차/<timestamp>/`
-- 포커스 실행: `research_reports/V10_자동회차/<focus-slug>/<timestamp>/`
+20개의 YAML 기반 에이전트 페르소나가 팀별로 구성되어 있습니다.
 
-JSON 핵심 필드
-- `ranked`: 통합 점수 순위
-- `agent_scores`: CEO/Planner/Developer 별 점수
-- `agent_scores_initial`: 토론 전 초기 점수
-- `agent_rankings`: 에이전트별 TopN ID
-- `debate_rounds_requested`: CLI 요청 토론 라운드 수
-- `debate_rounds_executed`: 수렴 기반 실제 실행 라운드 수
-- `consensus`: 가중 합의 후보
-- `research_queries`: 상위 주제의 웹 검증 검색 키워드
-- `discussion`: 라운드별 에이전트 토론 로그(지원/반대 메시지, confidence/evidence, 안정성 지표)
+| Team / 팀 | Personas / 페르소나 |
+|---|---|
+| Strategy / 전략 | CEO, Planner |
+| Product / 제품 | PM, Market Analyst, Finance Analyst |
+| Engineering / 엔지니어링 | Backend Developer, Frontend Developer, DevOps |
+| Research / 연구 | Researcher, Data Scientist, Linguist |
+| QA | QA Lead, QA, Search Evaluator |
+| Operations / 운영 | Ops, DevOps SRE |
+| Governance / 거버넌스 | Debate Supervisor |
 
-## 분리형 사용 이유
+각 에이전트는 독립된 스코어링 기준과 관점을 가지고 토론에 참여하며, 최종 합의를 도출합니다.
 
-기존 Ora 소스 코드 변경 없이 별도 폴더에서 실행/버전관리할 수 있도록 구성했습니다.
-`src`와 `scripts`가 자체적으로 동작하므로, 연구 자동화 파이프라인만 독립 운영할 수 있습니다.
+## Research Source Verification / 리서치 소스 검증
 
+`verify_sources.py`는 생성된 리서치 리포트의 출처를 자동 검증합니다.
 
-## E2E(Cypress) 자동화
-
-`ora-automation`에서 바로 E2E 실행 타깃을 붙였습니다.
+- URL 접근성 확인 (HTTP 상태 코드)
+- arXiv API 교차 검증 (`verified_by_arxiv_api`)
+- Crossref API / OpenAlex API fallback 검증
+- 미검증 항목 자동 재시도 (`--rounds`, `--retry-delay`)
 
 ```bash
-cd /Users/mike/workspace/side_project/Ora/ora-automation
-
-# 1) Cypress 설치 (기본 npm)
-make e2e-install E2E_PROJECT_DIR=/Users/mike/workspace/side_project/Ora/OraWebAppFrontend
-
-# 1-b) Playwright 설치 (기본 npm)
-make e2e-playwright-install E2E_PROJECT_DIR=/Users/mike/workspace/side_project/Ora/OraWebAppFrontend
-
-# 2) 설치 후 Cypress GUI 실행
-make e2e-open E2E_PROJECT_DIR=/Users/mike/workspace/side_project/Ora/OraWebAppFrontend
-
-# 3) 설치 후 Headless 실행
-make e2e-run E2E_PROJECT_DIR=/Users/mike/workspace/side_project/Ora/OraWebAppFrontend
-
-# 3-b) 설치 후 Playwright Headless 실행
-make e2e-run E2E_PROJECT_DIR=/Users/mike/workspace/side_project/Ora/OraWebAppFrontend E2E_TOOL=playwright
-
-# 4) Playwright UI 실행
-make e2e-open E2E_PROJECT_DIR=/Users/mike/workspace/side_project/Ora/OraWebAppFrontend E2E_TOOL=playwright
-
-# 옵션: pnpm 사용 시
-make e2e-open E2E_PM=pnpm E2E_PROJECT_DIR=/Users/mike/workspace/side_project/Ora/OraWebAppFrontend
+make verify-sources VERIFY_SOURCE_FILES="path/to/research_sources.json"
 ```
 
-- `E2E_PROJECT_DIR`: Cypress를 실행할 프론트엔드 폴더
-- `E2E_PM`: 패키지 매니저(`npm` / `pnpm` / `yarn`, 기본 `npm`)
-- `E2E_BASE_URL`: e2e 실행 시 baseUrl override
-- `E2E_TOOL`: `cypress` 또는 `playwright` (기본: `cypress`)
-- `E2E_CONFIG_FILE`: config 파일 경로 지정 시 사용
-- `E2E_SPEC_FILE`: 특정 spec 파일만 실행할 때 사용
+## E2E Testing / E2E 테스트
 
-### 서비스별 E2E 분리 실행
-
-`automations/e2e/services/` 기준에서 서비스 단위로 실행하도록 정리했습니다.
+서비스별 E2E 테스트를 Cypress 또는 Playwright로 실행합니다.
 
 ```bash
-cd /Users/mike/workspace/side_project/Ora/ora-automation
+# 서비스별 실행
+make e2e-service SERVICE=b2b       # OraB2bServer (Gradle)
+make e2e-service SERVICE=b2c       # OraWebAppFrontend (npm)
+make e2e-service SERVICE=ai        # OraAiServer (pytest)
+make e2e-service SERVICE=android   # OraB2bAndroid (Gradle)
+make e2e-service SERVICE=telecom   # OraServer (Gradle)
 
-# B2B: OraB2bServer (Gradle e2e)
-make e2e-service SERVICE=b2b
-
-# B2C: OraWebAppFrontend (기본: npm test)
-make e2e-service SERVICE=b2c
-
-# B2C를 Playwright로 실행
-make e2e-service SERVICE=b2c E2E_TOOL=playwright
-
-# Android: OraB2bAndroid (Gradle :app:test)
-make e2e-service SERVICE=android
-
-# AI: OraAiServer LLM/TTS (pytest)
-make e2e-service SERVICE=ai
-
-# 통신: OraServer (Gradle test)
-make e2e-service SERVICE=telecom
-
-# 5개 기본 슬롯을 한 번에
+# 전체 서비스 일괄 실행
 make e2e-service-all
 
-# QA 프로그램(서비스별 실행 + 결과 리포트)
-make qa-program
-
-# QA 프로그램 반복 실행
-make qa-program-loop QA_LOOP_CYCLES=3
-
-# 최신 QA 리포트 경로 확인
-make qa-report-latest
-
-# AI 테스트 인수 조정
-make e2e-service SERVICE=ai E2E_PYTEST_ARGS="tests/test_scenario_edge.py -q"
-
-# B2C를 Cypress로 강제 실행
-make e2e-service SERVICE=b2c E2E_FORCE_CYPRESS=1 E2E_SERVICE_MODE=open
+# Playwright로 전환
+make e2e-service SERVICE=b2c E2E_TOOL=playwright
 ```
 
-`make qa-program`은 `research_reports/qa_runs/<run_name>/`에 아래 파일을 생성합니다.
+## QA Program / QA 프로그램
 
-- `qa_summary.md`: 노션/공유용 요약 보고서
-- `qa_summary.json`: 파이프라인 연계용 구조화 결과
-- `<service>_attemptN.log`: 서비스별 실행 로그
-
-### 지원 서비스 목록
+서비스별 E2E 실행 + 결과 리포트를 자동 생성합니다.
 
 ```bash
-make e2e-service-list
+make qa-program                      # 1회 실행
+make qa-program-loop QA_LOOP_CYCLES=3  # 3회 반복
+make qa-report-latest                # 최신 리포트 경로
 ```
 
-- `b2b` - OraB2bServer
-- `android` - OraB2bAndroid (`:app:test`)
-- `b2c` - OraWebAppFrontend
-- `ai` - OraAiServer (LLM/TTS pytest)
-- `telecom` - OraServer (통신)
+출력: `research_reports/qa_runs/<run_name>/`
+- `qa_summary.md` — 요약 보고서
+- `qa_summary.json` — 구조화 결과
+- `<service>_attemptN.log` — 서비스별 실행 로그
+
+## Output / 출력물
+
+| File / 파일 | Description / 설명 |
+|---|---|
+| `rd_research_report_*.md` | Markdown 리서치 리포트 |
+| `rd_research_report_*.json` | 구조화 JSON (점수, 토론 로그, 합의) |
+| `research_sources.json` | 검증된 출처 URL 목록 |
+
+### JSON Key Fields / JSON 핵심 필드
+
+- `ranked` — 통합 점수 순위
+- `agent_scores` — 에이전트별 점수 (토론 후)
+- `agent_scores_initial` — 토론 전 초기 점수
+- `debate_rounds_executed` — 실제 수행 토론 라운드 수
+- `consensus` — 가중 합의 후보
+- `discussion` — 라운드별 토론 로그 (지지/반대, confidence, evidence)
+
+## Environment Variables / 환경변수
+
+### LLM (Gemini)
+
+| Variable | Description / 설명 | Default |
+|---|---|---|
+| `GOOGLE_APPLICATION_CREDENTIALS` | GCP 서비스 계정 JSON 경로 | - |
+| `GOOGLE_CLOUD_PROJECT_ID` | GCP 프로젝트 ID | - |
+| `GOOGLE_CLOUD_LOCATION` | Primary region | `asia-northeast3` |
+| `GOOGLE_CLOUD_FALLBACK_LOCATIONS` | Fallback regions (콤마 구분) | `us-central1,us-east1,europe-west1` |
+| `GEMINI_MODEL` | Gemini 모델명 | `gemini-2.5-flash` |
+
+### API
+
+| Variable | Description / 설명 | Default |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL 연결 문자열 | `postgresql+psycopg://ora:ora@db:5432/ora_automation` |
+| `RABBITMQ_URL` | AMQP 연결 문자열 | `amqp://guest:guest@rabbitmq:5672/%2F` |
+| `ORA_AUTOMATION_ROOT` | ora-automation 루트 경로 | `/workspace/Ora/ora-automation` |
+| `ORA_PROJECTS_ROOT` | 프로젝트 스캔 상위 디렉토리 | `ORA_AUTOMATION_ROOT`의 상위 |
+
+### Orchestration Tuning / 오케스트레이션 튜닝
+
+| Variable | Description / 설명 | Default |
+|---|---|---|
+| `ORCHESTRATION_PROFILE` | `standard` 또는 `strict` | `standard` |
+| `DEBATE_ROUNDS` | 토론 라운드 수 | `2` |
+| `TOP` | 분석할 상위 전략 수 | `6` |
+
+### Research Source API
+
+| Variable | Description / 설명 | Default |
+|---|---|---|
+| `ORA_RD_RESEARCH_ARXIV_SEARCH` | arXiv 검색 활성화 (`1`/`0`) | `1` |
+| `ORA_RD_RESEARCH_CROSSREF_SEARCH` | Crossref 검색 활성화 | `1` |
+| `ORA_RD_RESEARCH_OPENALEX_SEARCH` | OpenAlex 검색 활성화 | `1` |
+| `ORA_RD_RESEARCH_SEARCH_TIMEOUT` | 검색 타임아웃 (초) | `10` |
+
+## Documentation / 문서
+
+- [Architecture / 아키텍처 문서](docs/ARCHITECTURE.md) — 시스템 아키텍처, 컴포넌트 관계, 데이터 흐름
+- [API Reference / API 레퍼런스](docs/API_REFERENCE.md) — 전체 엔드포인트 상세 문서 (요청/응답 스키마, 예시)
+
+## License
+
+Private project.

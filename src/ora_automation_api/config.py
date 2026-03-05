@@ -79,6 +79,12 @@ class Settings:
         self.retry_max_seconds = float(
             os.getenv("ORA_AUTOMATION_RETRY_MAX_SECONDS", "600.0").strip()
         )
+        self.projects_root = Path(
+            os.getenv("ORA_PROJECTS_ROOT", str(self.automation_root.parent))
+        ).resolve()
+
+        self.assistant_name = os.getenv("ORA_ASSISTANT_NAME", "Ora").strip()
+
         self.llm_planner_cmd = os.getenv("ORA_AUTOMATION_LLM_PLANNER_CMD", "").strip()
         self.llm_planner_timeout_seconds = float(
             os.getenv("ORA_AUTOMATION_LLM_PLANNER_TIMEOUT_SECONDS", "30.0").strip()

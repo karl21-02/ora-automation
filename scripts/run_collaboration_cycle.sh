@@ -204,7 +204,8 @@ while [ "${cycle}" -le "${RUN_CYCLES}" ]; do
 
   TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
   OUT_DIR="${RUN_ROOT}/${TIMESTAMP}"
-  mkdir -p "${OUT_DIR}"
+  # Directory is created by the Python pipeline (output_dir.mkdir) only when
+  # there is actual content to write — avoids leftover empty directories.
 
   HISTORY_ARGS=()
   while IFS= read -r -d '' path; do
