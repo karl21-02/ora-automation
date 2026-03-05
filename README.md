@@ -371,6 +371,7 @@ make qa-report-latest                # 최신 리포트 경로
 
 - [Architecture / 아키텍처 문서](docs/ARCHITECTURE.md) — 시스템 아키텍처, 컴포넌트 관계, 데이터 흐름
 - [API Reference / API 레퍼런스](docs/API_REFERENCE.md) — 전체 엔드포인트 상세 문서 (요청/응답 스키마, 예시)
+- [GitHub Workflow / 깃허브 활용 규칙](docs/GITHUB_WORKFLOW.md) — 브랜치 전략, 커밋 컨벤션, PR/이슈/리뷰 규칙
 
 ## License
 

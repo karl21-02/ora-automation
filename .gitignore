@@ -1,7 +1,37 @@
+# Virtual environments
 .venv/
 **/.venv/
 venv/
 **/venv/
+
+# Python cache
 __pycache__/
 **/__pycache__/
 *.pyc
+*.pyo
+
+# Secrets & credentials
+.env
+.env.*
+*.pem
+*.key
+google-service-account.json
+credentials.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/

@@ -206,3 +206,9 @@ PYTHONPATH=src python3 -c "from ora_automation_api.config import settings; print
 make e2e-service SERVICE=ai
 make qa-program
 ```
+
+## Git Commit Rules
+
+- Follow [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <subject>`
+- Do NOT append `Co-Authored-By` lines to commit messages
+- See [docs/GITHUB_WORKFLOW.md](docs/GITHUB_WORKFLOW.md) for full branch/PR/review rules
