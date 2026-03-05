@@ -1,4 +1,4 @@
-import type { ChatChoice, ChatPlan, ChatResponse, OrchestrationEvent, OrchestrationRun, ProjectInfo, ReportListItem } from '../types'
+import type { ChatChoice, ChatPlan, ChatResponse, OrchestrationEvent, OrchestrationRun, ProjectInfo, ReportListItem, ScheduledJob, ScheduledJobCreate } from '../types'
 
 const BASE = '/api/v1'
 
@@ -183,4 +183,36 @@ export async function renameConversation(id: string, title: string): Promise<Con
 
 export async function listProjects(): Promise<ProjectInfo[]> {
   return request<ProjectInfo[]>(`${BASE}/projects`)
+}
+
+// ── Scheduler ──────────────────────────────────────────────────────
+
+export async function getScheduledJobs(): Promise<ScheduledJob[]> {
+  return request<ScheduledJob[]>(`${BASE}/scheduler/jobs`)
+}
+
+export async function createScheduledJob(data: ScheduledJobCreate): Promise<ScheduledJob> {
+  return request<ScheduledJob>(`${BASE}/scheduler/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateScheduledJob(id: string, data: Partial<ScheduledJobCreate>): Promise<ScheduledJob> {
+  return request<ScheduledJob>(`${BASE}/scheduler/jobs/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteScheduledJob(id: string): Promise<void> {
+  await fetch(`${BASE}/scheduler/jobs/${id}`, { method: 'DELETE' })
+}
+
+export async function triggerScheduledJob(id: string): Promise<OrchestrationRun> {
+  return request<OrchestrationRun>(`${BASE}/scheduler/jobs/${id}/run`, {
+    method: 'POST',
+  })
 }

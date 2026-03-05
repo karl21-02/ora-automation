@@ -90,3 +90,34 @@ export interface Conversation {
   messages: Message[]
   createdAt: Date
 }
+
+// ── Scheduler ──────────────────────────────────────────────────────
+
+export interface ScheduledJob {
+  id: string
+  name: string
+  description: string | null
+  target: string
+  env: Record<string, string>
+  interval_minutes: number | null
+  cron_expression: string | null
+  enabled: boolean
+  auto_publish_notion: boolean
+  last_run_at: string | null
+  last_run_status: string | null
+  last_run_id: string | null
+  next_run_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ScheduledJobCreate {
+  name: string
+  description?: string
+  target?: string
+  env?: Record<string, string>
+  interval_minutes?: number
+  cron_expression?: string
+  enabled?: boolean
+  auto_publish_notion?: boolean
+}
