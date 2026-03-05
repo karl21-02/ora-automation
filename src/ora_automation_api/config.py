@@ -115,5 +115,24 @@ class Settings:
             os.getenv("RABBITMQ_RECONNECT_SECONDS", "2.0").strip()
         )
 
+        # Notion integration
+        self.notion_api_token = os.getenv("NOTION_API_TOKEN", "").strip()
+        self.notion_api_version = os.getenv("NOTION_API_VERSION", "2022-06-28").strip()
+        self.notion_auto_publish = os.getenv("NOTION_AUTO_PUBLISH", "0").strip() in (
+            "1",
+            "true",
+            "yes",
+        )
+
+        # Scheduler
+        self.scheduler_enabled = os.getenv("ORA_SCHEDULER_ENABLED", "0").strip() in (
+            "1",
+            "true",
+            "yes",
+        )
+        self.scheduler_poll_seconds = int(
+            os.getenv("ORA_SCHEDULER_POLL_SECONDS", "60").strip()
+        )
+
 
 settings = Settings()

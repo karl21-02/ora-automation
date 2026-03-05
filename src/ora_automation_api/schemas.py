@@ -229,3 +229,81 @@ class ConversationCreate(BaseModel):
 class ConversationList(BaseModel):
     items: list[ConversationRead]
     total: int
+
+
+# ── Notion Integration ─────────────────────────────────────────────
+
+
+class NotionSetupResponse(BaseModel):
+    hub_page_id: str
+    reports_db_id: str
+    topics_db_id: str
+    dashboard_page_id: str
+    status: str = "created"
+
+
+class NotionPublishResponse(BaseModel):
+    report_page_id: str
+    report_url: str | None = None
+    topic_pages: list[dict] = Field(default_factory=list)
+    status: str = "published"
+
+
+class NotionStatusResponse(BaseModel):
+    connected: bool
+    bot_name: str | None = None
+    synced_reports_count: int = 0
+    unsynced_reports: list[str] = Field(default_factory=list)
+    last_sync_at: datetime | None = None
+
+
+class NotionSyncResponse(BaseModel):
+    synced: list[str] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
+    errors: list[dict] = Field(default_factory=list)
+    status: str = "completed"
+
+
+# ── Scheduler ──────────────────────────────────────────────────────
+
+
+class ScheduledJobCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = None
+    target: str = Field(default="run-cycle")
+    env: dict[str, str] = Field(default_factory=dict)
+    interval_minutes: int | None = None
+    cron_expression: str | None = None
+    enabled: bool = True
+    auto_publish_notion: bool = False
+
+
+class ScheduledJobUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    target: str | None = None
+    env: dict[str, str] | None = None
+    interval_minutes: int | None = Field(default=None)
+    cron_expression: str | None = Field(default=None)
+    enabled: bool | None = None
+    auto_publish_notion: bool | None = None
+
+
+class ScheduledJobRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    description: str | None = None
+    target: str
+    env: dict
+    interval_minutes: int | None = None
+    cron_expression: str | None = None
+    enabled: bool
+    auto_publish_notion: bool
+    last_run_at: datetime | None = None
+    last_run_status: str | None = None
+    last_run_id: str | None = None
+    next_run_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime

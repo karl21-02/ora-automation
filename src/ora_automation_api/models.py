@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -125,5 +125,50 @@ class OrchestrationEvent(Base):
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+
+class NotionSyncState(Base):
+    __tablename__ = "notion_sync_state"
+    __table_args__ = (
+        UniqueConstraint("entity_type", "entity_key", name="uq_notion_sync_entity"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    entity_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    notion_page_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    notion_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_report_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ScheduledJob(Base):
+    __tablename__ = "scheduled_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target: Mapped[str] = mapped_column(String(64), nullable=False, default="run-cycle")
+    env: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cron_expression: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    auto_publish_notion: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_run_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
