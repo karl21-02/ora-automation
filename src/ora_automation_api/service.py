@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import shlex
@@ -22,6 +23,8 @@ from .schemas import DecisionCreate, OrchestrationRunCreate
 
 TERMINAL_STATUSES = {"completed", "failed", "dlq", "skipped", "cancelled", "error"}
 RUNNABLE_STATUSES = {"queued", "retry", "dry-run"}
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -45,6 +48,23 @@ class CommandOutcome:
     timed_out: bool
     cancelled: bool
     paused: bool
+
+
+def _try_auto_publish_notion(run_id: str, db: Session) -> None:
+    """Check if a completed run should trigger Notion auto-publish."""
+    try:
+        from .models import ScheduledJob
+        job = db.scalar(
+            select(ScheduledJob).where(ScheduledJob.last_run_id == run_id)
+        )
+        if job and job.auto_publish_notion:
+            from .notion_publisher import auto_publish_latest_report
+            auto_publish_latest_report(run_id, db)
+        elif settings.notion_auto_publish:
+            from .notion_publisher import auto_publish_latest_report
+            auto_publish_latest_report(run_id, db)
+    except Exception as exc:
+        logger.warning("Auto-publish to Notion failed for run %s: %s", run_id, exc)
 
 
 def _sanitize_env(payload: dict[str, str]) -> dict[str, str]:
@@ -545,6 +565,7 @@ def execute_run(
                 db.add(run)
                 db.commit()
                 _record_event(db, run.id, stage, "stage_completed", "execution stage completed", {"exit_code": 0})
+                _try_auto_publish_notion(run.id, db)
                 return ExecutionOutcome(run_id=run.id, target=run.target, agent_role=agent_role, status="completed", fail_label="")
 
             fail_label = _resolve_fail_label(run, cmd_outcome.timed_out)
@@ -633,6 +654,7 @@ def execute_run(
         run.finished_at = datetime.utcnow()
         db.add(run)
         db.commit()
+        _try_auto_publish_notion(run.id, db)
         return ExecutionOutcome(run_id=run.id, target=run.target, agent_role=agent_role, status="completed", fail_label="")
     except Exception as exc:  # pragma: no cover
         run = db.get(OrchestrationRun, run_id)
