@@ -28,6 +28,16 @@ from ora_rd_orchestrator.gemini_provider import _get_ssl_context
 
 from .config import settings
 from .database import SessionLocal, get_db
+from .dialog_engine import (
+    DialogContext,
+    DialogState,
+    IntentType,
+    coerce_proposed_plans,
+    merge_slots,
+    run_stage1,
+    run_stage2_stream,
+    run_stage2_sync,
+)
 from .models import ChatConversation, ChatMessageRow
 from .schemas import (
     ChatChoice,
@@ -575,8 +585,301 @@ def _persist_message(
     ))
 
 
+def _use_upce() -> bool:
+    """Check whether the UPCE 2-stage pipeline is enabled."""
+    return os.getenv("ORA_CHAT_USE_UPCE", "0").strip() in ("1", "true", "yes")
+
+
+def _get_dialog_context(conv: ChatConversation) -> DialogContext:
+    """Load DialogContext from conversation row."""
+    if conv.dialog_context and isinstance(conv.dialog_context, dict):
+        try:
+            return DialogContext.model_validate(conv.dialog_context)
+        except Exception:
+            pass
+    return DialogContext()
+
+
+def _save_dialog_context(db: Session, conv: ChatConversation, ctx: DialogContext) -> None:
+    """Persist DialogContext to conversation row."""
+    conv.dialog_context = ctx.model_dump(mode="json")
+    db.add(conv)
+
+
+# ── UPCE chat (non-streaming) ────────────────────────────────────────
+
+
+def _chat_upce(req: ChatRequest, db: Session) -> ChatResponse:
+    """2-stage UPCE pipeline for non-streaming chat."""
+    conv = _ensure_conversation(db, req.conversation_id)
+    if not conv.title and req.message:
+        conv.title = req.message[:100]
+
+    dialog_ctx = _get_dialog_context(conv)
+    projects = _scan_projects()
+    history = [{"role": m.role, "content": m.content} for m in req.history]
+
+    # Stage 1: Understanding
+    classification = run_stage1(req.message, history, dialog_ctx, projects)
+    dialog_ctx = merge_slots(dialog_ctx, classification)
+
+    # Short circuit: confirmation → no Stage 2 text needed
+    if classification.is_confirmation and dialog_ctx.proposed_plans:
+        plan, plans = coerce_proposed_plans(dialog_ctx.proposed_plans)
+        reply = "실행을 시작합니다."
+        _persist_message(db, conv.id, "user", req.message)
+        _persist_message(db, conv.id, "assistant", reply, plan=plan, plans=plans)
+        dialog_ctx.state = DialogState.EXECUTING
+        _save_dialog_context(db, conv, dialog_ctx)
+        db.commit()
+        return ChatResponse(
+            reply=reply, plan=plan, plans=plans,
+            dialog_state=DialogState.EXECUTING.value,
+            confirmation_required=False,
+        )
+
+    # Short circuit: rejection → reset
+    if classification.is_rejection:
+        reply = "취소했습니다. 다른 작업이 있으면 말씀해주세요."
+        dialog_ctx = DialogContext()
+        _persist_message(db, conv.id, "user", req.message)
+        _persist_message(db, conv.id, "assistant", reply)
+        _save_dialog_context(db, conv, dialog_ctx)
+        db.commit()
+        return ChatResponse(
+            reply=reply, dialog_state=DialogState.IDLE.value,
+        )
+
+    # Stage 2: Response generation (sync)
+    try:
+        reply = run_stage2_sync(
+            classification, history, req.message,
+            dialog_ctx, projects, settings.assistant_name,
+        )
+    except Exception as exc:
+        logger.error("Stage 2 sync failed: %s", exc)
+        reply = "죄송합니다, 응답 생성 중 오류가 발생했습니다. 다시 시도해주세요."
+
+    # Build response payloads from classification
+    plan: ChatPlan | None = None
+    plans: list[ChatPlan] | None = None
+    project_select: list[ProjectInfo] | None = None
+
+    if classification.proposed_plans:
+        plan, plans = coerce_proposed_plans(classification.proposed_plans)
+
+    if classification.needs_project_select:
+        project_select = projects if projects else None
+
+    confirmation_required = classification.next_state == DialogState.CONFIRMING
+
+    _persist_message(
+        db, conv.id, "user", req.message,
+    )
+    _persist_message(
+        db, conv.id, "assistant", reply,
+        plan=plan, plans=plans, project_select=project_select,
+    )
+    _save_dialog_context(db, conv, dialog_ctx)
+    db.commit()
+
+    return ChatResponse(
+        reply=reply,
+        plan=plan,
+        plans=plans,
+        project_select=project_select,
+        dialog_state=classification.next_state.value,
+        confirmation_required=confirmation_required,
+        intent_summary=f"{classification.intent.value} (confidence: {classification.confidence:.2f})",
+    )
+
+
+# ── UPCE chat_stream (SSE streaming) ─────────────────────────────────
+
+
+def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
+    """2-stage UPCE pipeline with SSE streaming."""
+    conv = _ensure_conversation(db, req.conversation_id)
+    if not conv.title and req.message:
+        conv.title = req.message[:100]
+
+    dialog_ctx = _get_dialog_context(conv)
+    projects = _scan_projects()
+    history = [{"role": m.role, "content": m.content} for m in req.history]
+
+    # Persist user message
+    _persist_message(db, conv.id, "user", req.message)
+    db.commit()
+    conv_id = conv.id
+
+    # Run Stage 1 before entering the generator (non-streaming, ~1-2s)
+    try:
+        classification = run_stage1(req.message, history, dialog_ctx, projects)
+    except Exception as exc:
+        logger.error("Stage 1 failed: %s", exc)
+        # Fall back to a simple error response
+        def error_gen() -> Generator[str, None, None]:
+            err = json.dumps({"type": "error", "content": f"분류 실패: {exc}"}, ensure_ascii=False)
+            yield f"data: {err}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(error_gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    updated_ctx = merge_slots(dialog_ctx, classification)
+
+    def generate() -> Generator[str, None, None]:
+        # Short circuit: confirmation
+        if classification.is_confirmation and updated_ctx.proposed_plans:
+            plan, plans = coerce_proposed_plans(updated_ctx.proposed_plans)
+            reply = "실행을 시작합니다."
+            token_data = json.dumps({"type": "token", "content": reply}, ensure_ascii=False)
+            yield f"data: {token_data}\n\n"
+            done_payload: dict[str, Any] = {
+                "type": "done",
+                "full_reply": reply,
+                "dialog_state": DialogState.EXECUTING.value,
+                "confirmation_required": False,
+            }
+            if plan:
+                done_payload["plan"] = {"target": plan.target, "env": plan.env, "label": plan.label}
+            if plans:
+                done_payload["plans"] = [{"target": p.target, "env": p.env, "label": p.label} for p in plans]
+            yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            # Persist
+            try:
+                pdb = SessionLocal()
+                try:
+                    _persist_message(pdb, conv_id, "assistant", reply, plan=plan, plans=plans)
+                    # Save context
+                    pconv = pdb.get(ChatConversation, conv_id)
+                    if pconv:
+                        exec_ctx = DialogContext(
+                            state=DialogState.EXECUTING,
+                            intent=updated_ctx.intent,
+                            accumulated_slots=updated_ctx.accumulated_slots,
+                            proposed_plans=updated_ctx.proposed_plans,
+                            turn_count=updated_ctx.turn_count,
+                        )
+                        pconv.dialog_context = exec_ctx.model_dump(mode="json")
+                        pdb.add(pconv)
+                    pdb.commit()
+                finally:
+                    pdb.close()
+            except Exception:
+                logger.exception("Failed to persist confirmation message")
+            return
+
+        # Short circuit: rejection
+        if classification.is_rejection:
+            reply = "취소했습니다. 다른 작업이 있으면 말씀해주세요."
+            token_data = json.dumps({"type": "token", "content": reply}, ensure_ascii=False)
+            yield f"data: {token_data}\n\n"
+            done_payload = {
+                "type": "done",
+                "full_reply": reply,
+                "dialog_state": DialogState.IDLE.value,
+            }
+            yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            try:
+                pdb = SessionLocal()
+                try:
+                    _persist_message(pdb, conv_id, "assistant", reply)
+                    pconv = pdb.get(ChatConversation, conv_id)
+                    if pconv:
+                        pconv.dialog_context = DialogContext().model_dump(mode="json")
+                        pdb.add(pconv)
+                    pdb.commit()
+                finally:
+                    pdb.close()
+            except Exception:
+                logger.exception("Failed to persist rejection message")
+            return
+
+        # Stage 2: Streaming response
+        full_text = ""
+        try:
+            for chunk in run_stage2_stream(
+                classification, history, req.message,
+                updated_ctx, projects, settings.assistant_name,
+            ):
+                full_text += chunk
+                data = json.dumps({"type": "token", "content": chunk}, ensure_ascii=False)
+                yield f"data: {data}\n\n"
+        except Exception as exc:
+            logger.error("Stage 2 streaming failed: %s", exc)
+            err_data = json.dumps({"type": "error", "content": f"응답 생성 실패: {exc}"})
+            yield f"data: {err_data}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # Build done event
+        plan: ChatPlan | None = None
+        plans_list: list[ChatPlan] | None = None
+        project_select: list[ProjectInfo] | None = None
+
+        if classification.proposed_plans:
+            plan, plans_list = coerce_proposed_plans(classification.proposed_plans)
+
+        if classification.needs_project_select:
+            project_select = projects if projects else None
+
+        confirmation_required = classification.next_state == DialogState.CONFIRMING
+
+        done_payload = {"type": "done", "full_reply": full_text}
+        if plan:
+            done_payload["plan"] = {"target": plan.target, "env": plan.env, "label": plan.label}
+        if plans_list:
+            done_payload["plans"] = [
+                {"target": p.target, "env": p.env, "label": p.label} for p in plans_list
+            ]
+        if project_select:
+            done_payload["project_select"] = [p.model_dump() for p in project_select]
+        done_payload["dialog_state"] = classification.next_state.value
+        done_payload["confirmation_required"] = confirmation_required
+        done_payload["intent_summary"] = f"{classification.intent.value} (confidence: {classification.confidence:.2f})"
+
+        yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+        # Persist assistant reply + dialog context
+        try:
+            pdb = SessionLocal()
+            try:
+                _persist_message(
+                    pdb, conv_id, "assistant", full_text,
+                    plan=plan, plans=plans_list, project_select=project_select,
+                )
+                pconv = pdb.get(ChatConversation, conv_id)
+                if pconv:
+                    pconv.dialog_context = updated_ctx.model_dump(mode="json")
+                    pdb.add(pconv)
+                pdb.commit()
+            finally:
+                pdb.close()
+        except Exception:
+            logger.exception("Failed to persist streamed assistant message")
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── Endpoints ────────────────────────────────────────────────────────
+
+
 @router.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
+    if _use_upce():
+        return _chat_upce(req, db)
+
+    # ── Legacy path ──
     # Build Gemini conversation contents from history
     contents: list[dict] = []
     for msg in req.history:
@@ -620,6 +923,10 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
 @router.post("/chat/stream")
 def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
     """SSE streaming chat endpoint. Yields tokens as they arrive from Gemini."""
+    if _use_upce():
+        return _chat_stream_upce(req, db)
+
+    # ── Legacy path ──
     contents: list[dict] = []
     for msg in req.history:
         contents.append({

@@ -75,6 +75,7 @@ def _run_ddl_migrations() -> None:
         "ALTER TABLE orchestration_runs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ",
         "ALTER TABLE orchestration_runs ADD COLUMN IF NOT EXISTS decision_id VARCHAR(36)",
         "ALTER TABLE orchestration_runs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+        "ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS dialog_context JSONB",
     ]
     with engine.begin() as conn:
         for stmt in statements:

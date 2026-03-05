@@ -172,6 +172,9 @@ class ChatResponse(BaseModel):
     choices: list[ChatChoice] | None = None
     project_select: list[ProjectInfo] | None = None
     run_id: str | None = None
+    dialog_state: str | None = None
+    confirmation_required: bool = False
+    intent_summary: str | None = None
 
 
 class BatchRunCreate(BaseModel):

@@ -18,6 +18,8 @@ export interface ProjectInfo {
   description: string
 }
 
+export type DialogState = 'idle' | 'understanding' | 'slot_filling' | 'confirming' | 'executing' | 'reporting'
+
 export interface ChatResponse {
   reply: string
   plan: ChatPlan | null
@@ -25,6 +27,9 @@ export interface ChatResponse {
   choices: ChatChoice[] | null
   project_select: ProjectInfo[] | null
   run_id: string | null
+  dialog_state: DialogState | null
+  confirmation_required: boolean
+  intent_summary: string | null
 }
 
 export interface ReportListItem {
@@ -73,6 +78,9 @@ export interface Message {
   choices?: ChatChoice[] | null
   projectSelect?: ProjectInfo[] | null
   runId?: string | null
+  dialogState?: DialogState | null
+  confirmationRequired?: boolean | null
+  intentSummary?: string | null
   timestamp: Date
 }
 

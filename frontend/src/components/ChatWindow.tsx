@@ -142,6 +142,15 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
           if (event.project_select && event.project_select.length > 0) {
             updates.projectSelect = event.project_select
           }
+          if (event.dialog_state) {
+            updates.dialogState = event.dialog_state
+          }
+          if (event.confirmation_required) {
+            updates.confirmationRequired = true
+          }
+          if (event.intent_summary) {
+            updates.intentSummary = event.intent_summary
+          }
           onUpdateMessage(assistantId, updates)
         } else if (event.type === 'error') {
           onUpdateMessage(assistantId, {
@@ -165,7 +174,13 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
     }
   }, [input, loading, conversationId, onNewMessage, onUpdateMessage, messages])
 
-  const handleExecute = useCallback(async (plan: ChatPlan) => {
+  const handleExecute = useCallback(async (plan: ChatPlan, confirmViaChat?: boolean) => {
+    // UPCE mode: send "확인" as a chat message instead of direct API call
+    if (confirmViaChat) {
+      handleSend('확인')
+      return
+    }
+
     const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
     const prompt = lastUserMsg?.content || `Execute ${plan.target}`
 
@@ -191,7 +206,7 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
         timestamp: new Date(),
       })
     }
-  }, [messages, onNewMessage])
+  }, [messages, onNewMessage, handleSend])
 
   const handleExecuteBatch = useCallback(async (plans: ChatPlan[]) => {
     const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')

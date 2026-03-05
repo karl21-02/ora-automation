@@ -5,7 +5,7 @@ import ProjectSelectCard from './ProjectSelectCard'
 
 interface Props {
   message: Message
-  onExecute?: (plan: ChatPlan) => void
+  onExecute?: (plan: ChatPlan, confirmViaChat?: boolean) => void
   onExecuteBatch?: (plans: ChatPlan[]) => void
   onDismissPlan?: () => void
   onChoiceClick?: (value: string) => void
@@ -104,6 +104,22 @@ export default function MessageBubble({ message, onExecute, onExecuteBatch, onDi
           </div>
         ) : (
           <span style={{ color: '#9ca3af', fontSize: 13 }}>&#9608;</span>
+        )}
+
+        {/* ── UPCE confirmation banner ── */}
+        {message.confirmationRequired && (
+          <div style={{
+            marginTop: 10,
+            padding: '8px 12px',
+            borderRadius: 8,
+            backgroundColor: '#fefce8',
+            border: '1px solid #fde68a',
+            fontSize: 12,
+            color: '#92400e',
+            fontWeight: 500,
+          }}>
+            Awaiting confirmation to proceed
+          </div>
         )}
 
         {/* ── Multi-plan card ── */}
@@ -410,7 +426,7 @@ export default function MessageBubble({ message, onExecute, onExecuteBatch, onDi
                 {onExecute && (
                   <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                     <button
-                      onClick={() => onExecute(message.plan!)}
+                      onClick={() => onExecute(message.plan!, message.confirmationRequired ?? false)}
                       disabled={executing}
                       style={{
                         flex: 1,
