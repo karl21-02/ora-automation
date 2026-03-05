@@ -36,6 +36,9 @@ export interface StreamEvent {
   plans?: { target: string; env: Record<string, string>; label?: string }[] | null
   choices?: ChatChoice[] | null
   project_select?: ProjectInfo[] | null
+  dialog_state?: string | null
+  confirmation_required?: boolean
+  intent_summary?: string | null
 }
 
 export async function sendChatStream(

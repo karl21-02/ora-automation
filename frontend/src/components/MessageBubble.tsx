@@ -10,7 +10,16 @@ interface Props {
   onDismissPlan?: () => void
   onChoiceClick?: (value: string) => void
   onProjectConfirm?: (selected: string[]) => void
+  onConfirmDialog?: () => void
+  onRejectDialog?: () => void
   executing?: boolean
+}
+
+const DIALOG_STATE_LABELS: Record<string, string> = {
+  understanding: '분석 중',
+  slot_filling: '정보 수집 중',
+  confirming: '확인 대기',
+  executing: '실행 중',
 }
 
 const ALLOWED_TARGETS = [
@@ -18,7 +27,7 @@ const ALLOWED_TARGETS = [
   'run-single', 'e2e-service', 'e2e-service-all', 'verify-sources',
 ]
 
-export default function MessageBubble({ message, onExecute, onExecuteBatch, onDismissPlan, onChoiceClick, onProjectConfirm, executing }: Props) {
+export default function MessageBubble({ message, onExecute, onExecuteBatch, onDismissPlan, onChoiceClick, onProjectConfirm, onConfirmDialog, onRejectDialog, executing }: Props) {
   const isUser = message.role === 'user'
   const [editing, setEditing] = useState(false)
   const [editTarget, setEditTarget] = useState(message.plan?.target || '')
@@ -106,7 +115,33 @@ export default function MessageBubble({ message, onExecute, onExecuteBatch, onDi
           <span style={{ color: '#9ca3af', fontSize: 13 }}>&#9608;</span>
         )}
 
-        {/* ── UPCE confirmation banner ── */}
+        {/* ── Dialog state badge ── */}
+        {!isUser && message.dialogState && message.dialogState !== 'idle' && (
+          <div style={{
+            marginTop: 6,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '2px 8px',
+            borderRadius: 12,
+            backgroundColor: '#fff7ed',
+            border: '1px solid #fed7aa',
+            fontSize: 11,
+            color: '#9a3412',
+            fontWeight: 500,
+          }}>
+            <span style={{
+              display: 'inline-block',
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              backgroundColor: '#f59e0b',
+            }} />
+            {DIALOG_STATE_LABELS[message.dialogState] ?? message.dialogState}
+          </div>
+        )}
+
+        {/* ── UPCE confirmation banner with buttons ── */}
         {message.confirmationRequired && (
           <div style={{
             marginTop: 10,
@@ -118,7 +153,45 @@ export default function MessageBubble({ message, onExecute, onExecuteBatch, onDi
             color: '#92400e',
             fontWeight: 500,
           }}>
-            Awaiting confirmation to proceed
+            <div>실행 계획을 확인해주세요</div>
+            {(onConfirmDialog || onRejectDialog) && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                {onConfirmDialog && (
+                  <button
+                    onClick={onConfirmDialog}
+                    style={{
+                      padding: '6px 16px',
+                      borderRadius: 7,
+                      border: 'none',
+                      backgroundColor: '#059669',
+                      color: '#fff',
+                      fontWeight: 600,
+                      fontSize: 12,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    확인
+                  </button>
+                )}
+                {onRejectDialog && (
+                  <button
+                    onClick={onRejectDialog}
+                    style={{
+                      padding: '6px 16px',
+                      borderRadius: 7,
+                      border: '1px solid #d1d5db',
+                      backgroundColor: '#fff',
+                      color: '#6b7280',
+                      fontWeight: 500,
+                      fontSize: 12,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    취소
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -540,6 +613,9 @@ export default function MessageBubble({ message, onExecute, onExecuteBatch, onDi
           textAlign: isUser ? 'right' : 'left',
         }}>
           {message.timestamp.toLocaleTimeString()}
+          {!isUser && message.intentSummary && (
+            <span style={{ marginLeft: 8 }}>{message.intentSummary}</span>
+          )}
         </div>
       </div>
     </div>

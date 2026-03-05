@@ -319,6 +319,8 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
               onDismissPlan={(msg.plan || (msg.plans && msg.plans.length > 0)) ? () => handleDismissPlan(msg.id) : undefined}
               onChoiceClick={isLastAssistant && msg.choices && msg.choices.length > 0 ? handleChoiceClick : undefined}
               onProjectConfirm={isLastAssistant && msg.projectSelect && msg.projectSelect.length > 0 ? handleProjectConfirm : undefined}
+              onConfirmDialog={isLastAssistant && msg.confirmationRequired ? () => handleSend('확인') : undefined}
+              onRejectDialog={isLastAssistant && msg.confirmationRequired ? () => handleSend('취소') : undefined}
               executing={executingPlanId != null && (executingPlanId === msg.plan?.target || executingPlanId === 'batch')}
             />
           )

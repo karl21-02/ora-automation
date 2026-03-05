@@ -16,6 +16,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from ora_rd_orchestrator.chatbot import (
@@ -56,6 +57,11 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
+
+
+class StaleDialogError(Exception):
+    """Raised when dialog_context optimistic lock fails (concurrent update)."""
+    pass
 
 # Pre-compiled regex patterns
 _RE_JSON_BLOCK = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
@@ -590,20 +596,37 @@ def _use_upce() -> bool:
     return os.getenv("ORA_CHAT_USE_UPCE", "0").strip() in ("1", "true", "yes")
 
 
-def _get_dialog_context(conv: ChatConversation) -> DialogContext:
-    """Load DialogContext from conversation row."""
+def _get_dialog_context(conv: ChatConversation) -> tuple[DialogContext, int]:
+    """Load DialogContext and version from conversation row."""
+    version = conv.dialog_context_version or 0
     if conv.dialog_context and isinstance(conv.dialog_context, dict):
         try:
-            return DialogContext.model_validate(conv.dialog_context)
+            return DialogContext.model_validate(conv.dialog_context), version
         except Exception:
             pass
-    return DialogContext()
+    return DialogContext(), version
 
 
-def _save_dialog_context(db: Session, conv: ChatConversation, ctx: DialogContext) -> None:
-    """Persist DialogContext to conversation row."""
-    conv.dialog_context = ctx.model_dump(mode="json")
-    db.add(conv)
+def _save_dialog_context(
+    db: Session, conv: ChatConversation, ctx: DialogContext, expected_version: int,
+) -> None:
+    """Persist DialogContext with optimistic lock on version."""
+    result = db.execute(
+        update(ChatConversation)
+        .where(
+            ChatConversation.id == conv.id,
+            ChatConversation.dialog_context_version == expected_version,
+        )
+        .values(
+            dialog_context=ctx.model_dump(mode="json"),
+            dialog_context_version=expected_version + 1,
+        )
+    )
+    if result.rowcount == 0:
+        raise StaleDialogError(
+            f"dialog_context version conflict for conversation {conv.id} "
+            f"(expected {expected_version})"
+        )
 
 
 # ── UPCE chat (non-streaming) ────────────────────────────────────────
@@ -615,7 +638,7 @@ def _chat_upce(req: ChatRequest, db: Session) -> ChatResponse:
     if not conv.title and req.message:
         conv.title = req.message[:100]
 
-    dialog_ctx = _get_dialog_context(conv)
+    dialog_ctx, ctx_version = _get_dialog_context(conv)
     projects = _scan_projects()
     history = [{"role": m.role, "content": m.content} for m in req.history]
 
@@ -630,7 +653,11 @@ def _chat_upce(req: ChatRequest, db: Session) -> ChatResponse:
         _persist_message(db, conv.id, "user", req.message)
         _persist_message(db, conv.id, "assistant", reply, plan=plan, plans=plans)
         dialog_ctx.state = DialogState.EXECUTING
-        _save_dialog_context(db, conv, dialog_ctx)
+        try:
+            _save_dialog_context(db, conv, dialog_ctx, ctx_version)
+        except StaleDialogError:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Dialog context was modified concurrently. Please retry.")
         db.commit()
         return ChatResponse(
             reply=reply, plan=plan, plans=plans,
@@ -644,7 +671,11 @@ def _chat_upce(req: ChatRequest, db: Session) -> ChatResponse:
         dialog_ctx = DialogContext()
         _persist_message(db, conv.id, "user", req.message)
         _persist_message(db, conv.id, "assistant", reply)
-        _save_dialog_context(db, conv, dialog_ctx)
+        try:
+            _save_dialog_context(db, conv, dialog_ctx, ctx_version)
+        except StaleDialogError:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Dialog context was modified concurrently. Please retry.")
         db.commit()
         return ChatResponse(
             reply=reply, dialog_state=DialogState.IDLE.value,
@@ -680,7 +711,11 @@ def _chat_upce(req: ChatRequest, db: Session) -> ChatResponse:
         db, conv.id, "assistant", reply,
         plan=plan, plans=plans, project_select=project_select,
     )
-    _save_dialog_context(db, conv, dialog_ctx)
+    try:
+        _save_dialog_context(db, conv, dialog_ctx, ctx_version)
+    except StaleDialogError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Dialog context was modified concurrently. Please retry.")
     db.commit()
 
     return ChatResponse(
@@ -703,7 +738,7 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
     if not conv.title and req.message:
         conv.title = req.message[:100]
 
-    dialog_ctx = _get_dialog_context(conv)
+    dialog_ctx, ctx_version = _get_dialog_context(conv)
     projects = _scan_projects()
     history = [{"role": m.role, "content": m.content} for m in req.history]
 
@@ -751,21 +786,21 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
                 pdb = SessionLocal()
                 try:
                     _persist_message(pdb, conv_id, "assistant", reply, plan=plan, plans=plans)
-                    # Save context
+                    exec_ctx = DialogContext(
+                        state=DialogState.EXECUTING,
+                        intent=updated_ctx.intent,
+                        accumulated_slots=updated_ctx.accumulated_slots,
+                        proposed_plans=updated_ctx.proposed_plans,
+                        turn_count=updated_ctx.turn_count,
+                    )
                     pconv = pdb.get(ChatConversation, conv_id)
                     if pconv:
-                        exec_ctx = DialogContext(
-                            state=DialogState.EXECUTING,
-                            intent=updated_ctx.intent,
-                            accumulated_slots=updated_ctx.accumulated_slots,
-                            proposed_plans=updated_ctx.proposed_plans,
-                            turn_count=updated_ctx.turn_count,
-                        )
-                        pconv.dialog_context = exec_ctx.model_dump(mode="json")
-                        pdb.add(pconv)
+                        _save_dialog_context(pdb, pconv, exec_ctx, ctx_version)
                     pdb.commit()
                 finally:
                     pdb.close()
+            except StaleDialogError:
+                logger.warning("Stale dialog context on confirmation persist (stream)")
             except Exception:
                 logger.exception("Failed to persist confirmation message")
             return
@@ -788,11 +823,12 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
                     _persist_message(pdb, conv_id, "assistant", reply)
                     pconv = pdb.get(ChatConversation, conv_id)
                     if pconv:
-                        pconv.dialog_context = DialogContext().model_dump(mode="json")
-                        pdb.add(pconv)
+                        _save_dialog_context(pdb, pconv, DialogContext(), ctx_version)
                     pdb.commit()
                 finally:
                     pdb.close()
+            except StaleDialogError:
+                logger.warning("Stale dialog context on rejection persist (stream)")
             except Exception:
                 logger.exception("Failed to persist rejection message")
             return
@@ -853,11 +889,12 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
                 )
                 pconv = pdb.get(ChatConversation, conv_id)
                 if pconv:
-                    pconv.dialog_context = updated_ctx.model_dump(mode="json")
-                    pdb.add(pconv)
+                    _save_dialog_context(pdb, pconv, updated_ctx, ctx_version)
                 pdb.commit()
             finally:
                 pdb.close()
+        except StaleDialogError:
+            logger.warning("Stale dialog context on stream persist")
         except Exception:
             logger.exception("Failed to persist streamed assistant message")
 
