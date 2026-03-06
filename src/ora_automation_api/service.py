@@ -3,11 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
-import shlex
-import subprocess
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -41,14 +39,17 @@ class ExecutionOutcome:
 
 
 @dataclass
-class CommandOutcome:
-    returncode: int
-    stdout: bytes
-    stderr: bytes
-    timed_out: bool
-    cancelled: bool
-    paused: bool
+class PipelineOutcome:
+    """Result of an in-process pipeline execution."""
+    result: dict = field(default_factory=dict)
+    error: tuple[str, str] | None = None   # (status, message)
+    timed_out: bool = False
+    cancelled: bool = False
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _try_auto_publish_notion(run_id: str, db: Session) -> None:
     """Check if a completed run should trigger Notion auto-publish."""
@@ -98,20 +99,6 @@ def _normalize_stages(stages: list[str]) -> list[str]:
     return normalized
 
 
-def _build_make_command(target: str, env: dict[str, str]) -> list[str]:
-    command = ["make", target]
-    for key in sorted(env.keys()):
-        command.append(f"{key}={env[key]}")
-    return command
-
-
-def _build_command_text(target: str, env: dict[str, str], override: str | None) -> str:
-    if override and override.strip():
-        return override.strip()
-    parts = _build_make_command(target, env)
-    return " ".join(shlex.quote(part) for part in parts)
-
-
 def _json_dump(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -121,15 +108,6 @@ def _run_dir(run_id: str) -> Path:
     p = settings.run_output_dir / run_id
     p.mkdir(parents=True, exist_ok=True)
     return p
-
-
-def _write_output_files(run: OrchestrationRun, stdout: bytes, stderr: bytes) -> tuple[str, str]:
-    run_dir = _run_dir(run.id)
-    stdout_path = run_dir / "stdout.log"
-    stderr_path = run_dir / "stderr.log"
-    stdout_path.write_bytes(stdout or b"")
-    stderr_path.write_bytes(stderr or b"")
-    return str(stdout_path), str(stderr_path)
 
 
 def _write_stage_artifact(run: OrchestrationRun, stage: str, payload: dict) -> str:
@@ -173,111 +151,6 @@ def _retry_delay_seconds(attempt_count: int) -> float:
     return min(max_delay, delay)
 
 
-def _safe_parse_command(command: str) -> list[str]:
-    return shlex.split(command)
-
-
-def _terminate_process(proc: subprocess.Popen[bytes]) -> None:
-    try:
-        proc.terminate()
-        proc.wait(timeout=3)
-    except Exception:
-        try:
-            proc.kill()
-            proc.wait(timeout=3)
-        except Exception:
-            pass
-
-
-def _run_with_heartbeat(
-    db: Session,
-    run: OrchestrationRun,
-    command: str,
-    timeout_seconds: float,
-    worker_id: str,
-) -> CommandOutcome:
-    env = os.environ.copy()
-    for key, value in (run.env or {}).items():
-        env[str(key)] = str(value)
-
-    proc = subprocess.Popen(
-        _safe_parse_command(command),
-        cwd=str(settings.automation_root),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-    )
-    started = time.monotonic()
-    next_heartbeat = started
-    timed_out = False
-    cancelled = False
-    paused = False
-
-    sleep_interval = 0.1  # start fast for responsive cancellation
-    while True:
-        if proc.poll() is not None:
-            break
-
-        now = time.monotonic()
-        elapsed = now - started
-        if elapsed > max(1.0, timeout_seconds):
-            timed_out = True
-            _terminate_process(proc)
-            break
-
-        if now >= next_heartbeat:
-            db.refresh(run)
-            if run.cancel_requested:
-                cancelled = True
-                _terminate_process(proc)
-                break
-            if run.pause_requested:
-                paused = True
-                _terminate_process(proc)
-                break
-            run.heartbeat_at = datetime.utcnow()
-            run.locked_by = worker_id
-            db.add(run)
-            db.commit()
-            next_heartbeat = now + max(0.5, settings.heartbeat_interval_seconds)
-
-        # Adaptive sleep: fast early (responsive cancel), slower when stable
-        if elapsed < 5.0:
-            sleep_interval = 0.1
-        elif elapsed < 30.0:
-            sleep_interval = 0.5
-        else:
-            sleep_interval = 1.0
-        time.sleep(sleep_interval)
-
-    stdout, stderr = proc.communicate()
-    return CommandOutcome(
-        returncode=int(proc.returncode if proc.returncode is not None else -1),
-        stdout=stdout or b"",
-        stderr=stderr or b"",
-        timed_out=timed_out,
-        cancelled=cancelled,
-        paused=paused,
-    )
-
-
-def _run_rollback(run: OrchestrationRun, worker_id: str) -> tuple[int, bytes, bytes]:
-    if not run.rollback_command:
-        return 0, b"", b""
-    env = os.environ.copy()
-    env["ORA_AUTOMATION_WORKER_ID"] = worker_id
-    proc = subprocess.run(
-        shlex.split(run.rollback_command),
-        cwd=str(settings.automation_root),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=max(1.0, settings.default_timeout_seconds),
-        check=False,
-        env=env,
-    )
-    return int(proc.returncode), proc.stdout or b"", proc.stderr or b""
-
-
 def _create_decision(db: Session, run_id: str, decision: DecisionCreate | None) -> str | None:
     if not decision:
         return None
@@ -297,10 +170,121 @@ def _create_decision(db: Session, run_id: str, decision: DecisionCreate | None) 
     return row.id
 
 
+# ---------------------------------------------------------------------------
+# env → generate_report() kwargs
+# ---------------------------------------------------------------------------
+
+def _env_to_pipeline_kwargs(env: dict[str, str]) -> dict:
+    """Convert run.env dict to keyword arguments for generate_report()."""
+    from pathlib import Path as _P
+
+    workspace = _P(env.get("WORKSPACE", str(settings.projects_root))).resolve()
+    output_dir = _P(env.get("OUTPUT_DIR", str(settings.run_output_dir))).resolve()
+
+    def _csv(key: str, default: str = "") -> list[str]:
+        return [v.strip() for v in env.get(key, default).split(",") if v.strip()]
+
+    return {
+        "workspace": workspace,
+        "top_k": int(env.get("TOP", "6")),
+        "output_dir": output_dir,
+        "output_name": env.get("OUTPUT_NAME", "rd_research_report"),
+        "max_files": int(env.get("MAX_FILES", "1500")),
+        "extensions": _csv("EXTENSIONS", "md,py,java,kt,ts,tsx,toml,yml,yaml,json,properties,xml,sh,gradle,txt"),
+        "ignore_dirs": set(_csv(
+            "IGNORE_DIRS",
+            ".git,.idea,.venv,venv,node_modules,target,build,dist,.gradle,.mvn,__pycache__,.pytest_cache",
+        )),
+        "history_files": [],
+        "report_focus": env.get("FOCUS", ""),
+        "version_tag": env.get("VERSION_TAG", "V10"),
+        "debate_rounds": int(env.get("DEBATE_ROUNDS", "2")),
+        "orchestration_profile": env.get("ORCHESTRATION_PROFILE", "standard"),
+        "orchestration_stages": _csv("PIPELINE_STAGES", "analysis,deliberation,execution"),
+        "service_scope": _csv("PIPELINE_SERVICES", env.get("PIPELINE_ALLOWED_SERVICES", "")),
+        "feature_scope": _csv("PIPELINE_FEATURES", ""),
+        "agent_mode": env.get("AGENT_MODE", "flat"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# In-process pipeline runner (replaces subprocess)
+# ---------------------------------------------------------------------------
+
+def _run_pipeline(
+    db: Session,
+    run: OrchestrationRun,
+    timeout_seconds: float,
+    worker_id: str,
+    org_config: dict | None = None,
+) -> PipelineOutcome:
+    """Run generate_report() in a daemon thread with heartbeat + cancel support."""
+    from ora_rd_orchestrator.pipeline import generate_report
+    from ora_rd_orchestrator.types import PipelineCancelled
+
+    cancel_event = threading.Event()
+    result_holder: dict = {}
+    error_holder: list[tuple[str, str]] = []
+
+    def _target() -> None:
+        try:
+            kwargs = _env_to_pipeline_kwargs(run.env or {})
+            # Override output_dir to run-specific directory
+            kwargs["output_dir"] = Path(_run_dir(run.id))
+            result = generate_report(
+                **kwargs,
+                cancel_event=cancel_event,
+                org_config=org_config,
+            )
+            result_holder.update(result)
+        except PipelineCancelled:
+            error_holder.append(("cancelled", "cancelled via cancel_event"))
+        except Exception as exc:
+            error_holder.append(("error", str(exc)))
+
+    thread = threading.Thread(target=_target, daemon=True)
+    thread.start()
+
+    started = time.monotonic()
+    while thread.is_alive():
+        elapsed = time.monotonic() - started
+        if elapsed > max(1.0, timeout_seconds):
+            cancel_event.set()
+            thread.join(timeout=10)
+            return PipelineOutcome(timed_out=True)
+
+        db.refresh(run)
+        if run.cancel_requested:
+            cancel_event.set()
+            thread.join(timeout=10)
+            return PipelineOutcome(cancelled=True)
+
+        run.heartbeat_at = datetime.utcnow()
+        run.locked_by = worker_id
+        db.add(run)
+        db.commit()
+
+        thread.join(timeout=max(0.5, settings.heartbeat_interval_seconds))
+
+    thread.join()
+
+    if error_holder:
+        status, msg = error_holder[0]
+        if status == "cancelled":
+            return PipelineOutcome(cancelled=True)
+        return PipelineOutcome(error=(status, msg))
+
+    return PipelineOutcome(result=result_holder)
+
+
+# ---------------------------------------------------------------------------
+# CRUD
+# ---------------------------------------------------------------------------
+
 def create_run(db: Session, payload: OrchestrationRunCreate) -> tuple[OrchestrationRun, bool]:
     target = _pick_target(payload.target)
     env = _sanitize_env(payload.env)
-    command = _build_command_text(target, env, payload.execution_command)
+    command = f"in-process:{target}"
     rollback_command = payload.rollback_command.strip() if payload.rollback_command else None
     idempotency_key = payload.idempotency_key.strip() if payload.idempotency_key else None
     pipeline_stages = _normalize_stages(payload.pipeline_stages)
@@ -426,15 +410,23 @@ def request_resume(db: Session, run_id: str) -> OrchestrationRun | None:
     return run
 
 
+# ---------------------------------------------------------------------------
+# Execute run (in-process pipeline)
+# ---------------------------------------------------------------------------
+
 def execute_run(
     run_id: str,
     worker_id: str = "worker",
     timeout_seconds: float | None = None,
+    db: Session | None = None,
+    org_config: dict | None = None,
 ) -> ExecutionOutcome:
     from .database import SessionLocal
 
     timeout = float(timeout_seconds or settings.default_timeout_seconds)
-    db = SessionLocal()
+    own_session = db is None
+    if own_session:
+        db = SessionLocal()
     try:
         run = db.get(OrchestrationRun, run_id)
         if not run:
@@ -473,6 +465,7 @@ def execute_run(
         run.locked_by = worker_id
         run.locked_at = datetime.utcnow()
         run.heartbeat_at = datetime.utcnow()
+        run.current_stage = "execution"
         db.add(run)
         db.commit()
 
@@ -481,7 +474,7 @@ def execute_run(
             run.id,
             "execution",
             "started",
-            "run execution started",
+            "run execution started (in-process)",
             {
                 "attempt_count": run.attempt_count,
                 "max_attempts": run.max_attempts,
@@ -489,111 +482,35 @@ def execute_run(
             },
         )
 
-        stages = _normalize_stages(list(run.pipeline_stages or []))
-        for stage in stages:
-            run.current_stage = stage
+        outcome = _run_pipeline(
+            db=db,
+            run=run,
+            timeout_seconds=timeout,
+            worker_id=worker_id,
+            org_config=org_config,
+        )
+
+        if outcome.cancelled:
+            run.status = "cancelled"
+            run.fail_label = "STOP"
+            run.finished_at = datetime.utcnow()
             db.add(run)
             db.commit()
-
-            stage_payload = {
-                "run_id": run.id,
-                "stage": stage,
-                "status": "started",
-                "target": run.target,
-                "agent_role": run.agent_role,
-            }
-            artifact_path = _write_stage_artifact(run, stage, stage_payload)
-            _record_event(
-                db,
-                run.id,
-                stage,
-                "stage_started",
-                f"{stage} stage started",
-                {"artifact_path": artifact_path},
+            _record_event(db, run.id, "execution", "cancelled", "run cancelled during execution", {})
+            return ExecutionOutcome(
+                run_id=run.id, target=run.target, agent_role=agent_role,
+                status="cancelled", fail_label="STOP",
+                should_dlq=True, dlq_reason="cancelled during execution",
             )
 
-            if stage in {"analysis", "deliberation"}:
-                stage_payload["status"] = "completed"
-                stage_payload["message"] = f"{stage} artifact generated"
-                _write_stage_artifact(run, stage, stage_payload)
-                _record_event(db, run.id, stage, "stage_completed", f"{stage} stage completed", {"artifact_path": artifact_path})
-                continue
-
-            cmd_outcome = _run_with_heartbeat(
-                db=db,
-                run=run,
-                command=run.command,
-                timeout_seconds=timeout,
-                worker_id=worker_id,
-            )
-            stdout_path, stderr_path = _write_output_files(run, cmd_outcome.stdout, cmd_outcome.stderr)
-            run.stdout_path = stdout_path
-            run.stderr_path = stderr_path
-            run.exit_code = cmd_outcome.returncode
-
-            if cmd_outcome.paused:
-                run.status = "paused"
-                run.fail_label = "SKIP"
-                run.finished_at = datetime.utcnow()
-                db.add(run)
-                db.commit()
-                _record_event(db, run.id, stage, "paused", "run paused during execution", {})
-                return ExecutionOutcome(run_id=run.id, target=run.target, agent_role=agent_role, status="paused", fail_label="SKIP")
-
-            if cmd_outcome.cancelled:
-                run.status = "cancelled"
-                run.fail_label = "STOP"
-                run.finished_at = datetime.utcnow()
-                db.add(run)
-                db.commit()
-                _record_event(db, run.id, stage, "cancelled", "run cancelled during execution", {})
-                return ExecutionOutcome(
-                    run_id=run.id,
-                    target=run.target,
-                    agent_role=agent_role,
-                    status="cancelled",
-                    fail_label="STOP",
-                    should_dlq=True,
-                    dlq_reason="cancelled during execution",
-                )
-
-            if cmd_outcome.returncode == 0 and not cmd_outcome.timed_out:
-                run.status = "completed"
-                run.fail_label = ""
-                run.error_message = None
-                run.finished_at = datetime.utcnow()
-                db.add(run)
-                db.commit()
-                _record_event(db, run.id, stage, "stage_completed", "execution stage completed", {"exit_code": 0})
-                _try_auto_publish_notion(run.id, db)
-                return ExecutionOutcome(run_id=run.id, target=run.target, agent_role=agent_role, status="completed", fail_label="")
-
-            fail_label = _resolve_fail_label(run, cmd_outcome.timed_out)
+        if outcome.timed_out or outcome.error:
+            fail_label = _resolve_fail_label(run, outcome.timed_out)
             run.fail_label = fail_label
             run.error_message = (
-                f"execution failed (exit={cmd_outcome.returncode}, timed_out={cmd_outcome.timed_out})"
+                f"pipeline timed out after {timeout}s"
+                if outcome.timed_out
+                else f"pipeline error: {outcome.error[1] if outcome.error else 'unknown'}"
             )
-
-            rollback_rc, rollback_stdout, rollback_stderr = _run_rollback(run, worker_id)
-            if run.rollback_command:
-                rollback_path = _run_dir(run.id) / "rollback.log"
-                rollback_path.write_bytes(
-                    (rollback_stdout or b"")
-                    + b"\n--- stderr ---\n"
-                    + (rollback_stderr or b"")
-                )
-                _record_event(
-                    db,
-                    run.id,
-                    stage,
-                    "rollback_executed",
-                    "rollback command executed",
-                    {
-                        "rollback_command": run.rollback_command,
-                        "rollback_exit_code": rollback_rc,
-                        "rollback_log_path": str(rollback_path),
-                    },
-                )
 
             if fail_label == "SKIP":
                 run.status = "skipped"
@@ -609,22 +526,11 @@ def execute_run(
                 run.finished_at = datetime.utcnow()
                 db.add(run)
                 db.commit()
-                _record_event(
-                    db,
-                    run.id,
-                    stage,
-                    "retry_scheduled",
-                    "retry scheduled",
-                    {"retry_delay_seconds": delay},
-                )
+                _record_event(db, run.id, "execution", "retry_scheduled", "retry scheduled", {"retry_delay_seconds": delay})
                 return ExecutionOutcome(
-                    run_id=run.id,
-                    target=run.target,
-                    agent_role=agent_role,
-                    status="retry",
-                    fail_label="RETRY",
-                    should_retry=True,
-                    retry_delay_seconds=delay,
+                    run_id=run.id, target=run.target, agent_role=agent_role,
+                    status="retry", fail_label="RETRY",
+                    should_retry=True, retry_delay_seconds=delay,
                 )
 
             run.status = "dlq"
@@ -632,31 +538,31 @@ def execute_run(
             run.finished_at = datetime.utcnow()
             db.add(run)
             db.commit()
-            _record_event(
-                db,
-                run.id,
-                stage,
-                "moved_to_dlq",
-                "run moved to dlq",
-                {"attempt_count": run.attempt_count, "max_attempts": run.max_attempts},
-            )
+            _record_event(db, run.id, "execution", "moved_to_dlq", "run moved to dlq", {"attempt_count": run.attempt_count, "max_attempts": run.max_attempts})
             return ExecutionOutcome(
-                run_id=run.id,
-                target=run.target,
-                agent_role=agent_role,
-                status="dlq",
-                fail_label="STOP",
-                should_dlq=True,
-                dlq_reason="max attempts exceeded or stop policy",
+                run_id=run.id, target=run.target, agent_role=agent_role,
+                status="dlq", fail_label="STOP",
+                should_dlq=True, dlq_reason="max attempts exceeded or stop policy",
             )
 
+        # Success
         run.status = "completed"
+        run.fail_label = ""
+        run.error_message = None
+        run.exit_code = 0
         run.finished_at = datetime.utcnow()
         db.add(run)
         db.commit()
+        _record_event(db, run.id, "execution", "stage_completed", "pipeline completed", {})
+
+        # Save pipeline result as artifact
+        if outcome.result:
+            _write_stage_artifact(run, "pipeline_result", outcome.result)
+
         _try_auto_publish_notion(run.id, db)
         return ExecutionOutcome(run_id=run.id, target=run.target, agent_role=agent_role, status="completed", fail_label="")
-    except Exception as exc:  # pragma: no cover  # noqa: BLE001 — top-level safety net
+
+    except Exception as exc:  # pragma: no cover  # noqa: BLE001
         logger.exception("Unexpected error executing run %s", run_id)
         run = db.get(OrchestrationRun, run_id)
         if run:
@@ -667,27 +573,17 @@ def execute_run(
             run.finished_at = datetime.utcnow()
             db.add(run)
             db.commit()
-            _record_event(
-                db,
-                run.id,
-                run.current_stage or "execution",
-                "error",
-                "unexpected error",
-                {"error": str(exc)},
-            )
+            _record_event(db, run.id, run.current_stage or "execution", "error", "unexpected error", {"error": str(exc)})
             agent_role = pick_agent_role(run.target, run.agent_role)
             return ExecutionOutcome(
-                run_id=run.id,
-                target=run.target,
-                agent_role=agent_role,
-                status="error",
-                fail_label="STOP",
-                should_dlq=True,
-                dlq_reason=str(exc),
+                run_id=run.id, target=run.target, agent_role=agent_role,
+                status="error", fail_label="STOP",
+                should_dlq=True, dlq_reason=str(exc),
             )
         return ExecutionOutcome(run_id=run_id, target="unknown", agent_role="engineer", status="error", fail_label="STOP", should_dlq=True, dlq_reason=str(exc))
     finally:
-        db.close()
+        if own_session:
+            db.close()
 
 
 def recover_stale_runs(stale_after_seconds: float | None = None) -> list[ExecutionOutcome]:
@@ -717,13 +613,9 @@ def recover_stale_runs(stale_after_seconds: float | None = None) -> list[Executi
                 db.commit()
                 outcomes.append(
                     ExecutionOutcome(
-                        run_id=run.id,
-                        target=run.target,
-                        agent_role=role,
-                        status="retry",
-                        fail_label="RETRY",
-                        should_retry=True,
-                        retry_delay_seconds=delay,
+                        run_id=run.id, target=run.target, agent_role=role,
+                        status="retry", fail_label="RETRY",
+                        should_retry=True, retry_delay_seconds=delay,
                     )
                 )
             else:
@@ -734,21 +626,14 @@ def recover_stale_runs(stale_after_seconds: float | None = None) -> list[Executi
                 db.commit()
                 outcomes.append(
                     ExecutionOutcome(
-                        run_id=run.id,
-                        target=run.target,
-                        agent_role=role,
-                        status="dlq",
-                        fail_label="STOP",
-                        should_dlq=True,
-                        dlq_reason="stale run exceeded max attempts",
+                        run_id=run.id, target=run.target, agent_role=role,
+                        status="dlq", fail_label="STOP",
+                        should_dlq=True, dlq_reason="stale run exceeded max attempts",
                     )
                 )
             _record_event(
-                db,
-                run.id,
-                run.current_stage or "execution",
-                "stale_recovered",
-                "stale running job recovered",
+                db, run.id, run.current_stage or "execution",
+                "stale_recovered", "stale running job recovered",
                 {"attempt_count": run.attempt_count, "max_attempts": run.max_attempts},
             )
     finally:

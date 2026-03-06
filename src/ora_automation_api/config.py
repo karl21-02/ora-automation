@@ -118,6 +118,11 @@ class Settings:
             os.getenv("RABBITMQ_RECONNECT_SECONDS", "2.0").strip()
         )
 
+        # Worker concurrency
+        self.worker_max_concurrent = int(
+            os.getenv("ORA_WORKER_MAX_CONCURRENT", "2").strip()
+        )
+
         # Notion integration
         self.notion_api_token = os.getenv("NOTION_API_TOKEN", "").strip()
         self.notion_api_version = os.getenv("NOTION_API_VERSION", "2022-06-28").strip()
@@ -175,6 +180,10 @@ class Settings:
         if self.rabbitmq_prefetch < 1:
             logger.warning("rabbitmq_prefetch=%s invalid, using 1", self.rabbitmq_prefetch)
             self.rabbitmq_prefetch = 1
+
+        if self.worker_max_concurrent < 1:
+            logger.warning("worker_max_concurrent=%s invalid, using 1", self.worker_max_concurrent)
+            self.worker_max_concurrent = 1
 
         if self.default_target not in self.allowed_targets:
             logger.warning(
