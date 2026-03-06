@@ -100,13 +100,17 @@ def _find_report_json_files() -> list[Path]:
     ]:
         if not search_dir.exists():
             continue
+        count = 0
         for jf in search_dir.rglob("*.json"):
+            if count >= 500:
+                break
             try:
                 data = json.loads(jf.read_text(encoding="utf-8"))
                 if "ranked" in data and "report_version" in data:
                     files.append(jf)
             except Exception:
                 continue
+            count += 1
     return sorted(files, key=lambda f: f.stat().st_mtime, reverse=True)
 
 
@@ -410,7 +414,9 @@ def _resolve_report_path(report_path: str) -> Path | None:
     for search_dir in [settings.run_output_dir, settings.automation_root / "research_reports"]:
         if not search_dir.exists():
             continue
-        for match in search_dir.rglob(report_path):
+        for i, match in enumerate(search_dir.rglob(report_path)):
             if match.is_file():
                 return match
+            if i >= 100:
+                break
     return None

@@ -1256,16 +1256,23 @@ def _report_dirs() -> list[Path]:
     return dirs
 
 
+_MAX_REPORT_SCAN = 500  # safety cap on total files enumerated
+
+
 def _scan_reports() -> list[ReportListItem]:
     items: list[ReportListItem] = []
     seen: set[str] = set()
     for base_dir in _report_dirs():
-        for path in sorted(base_dir.rglob("*"), key=lambda p: p.stat().st_mtime, reverse=True):
+        collected: list[Path] = []
+        for path in base_dir.rglob("*"):
+            if len(collected) >= _MAX_REPORT_SCAN:
+                break
             if not path.is_file():
                 continue
+            if path.suffix.lower() in (".md", ".json"):
+                collected.append(path)
+        for path in sorted(collected, key=lambda p: p.stat().st_mtime, reverse=True):
             suffix = path.suffix.lower()
-            if suffix not in (".md", ".json"):
-                continue
             rel = str(path.relative_to(base_dir))
             if rel in seen:
                 continue
