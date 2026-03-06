@@ -11,6 +11,7 @@ Key capabilities:
 - **E2E Testing**: Orchestrated Cypress/Playwright test execution across multiple services
 - **QA Program**: Automated QA pipeline with reporting
 - **Chatbot**: Gemini-powered assistant that understands user intent and triggers orchestration runs
+- **Natural Language Scheduling**: Chat-based scheduling — "매일 아침 9시에 보안 트렌드 분석해줘" → ScheduledJob 자동 생성
 
 ## Architecture
 
@@ -87,6 +88,7 @@ ora-automation/
 │       ├── notion_router.py      # Notion endpoints (setup, publish, sync, status)
 │       ├── scheduler.py          # APScheduler DB-polling job scheduler
 │       ├── scheduler_router.py   # Scheduler CRUD API
+│       ├── scheduling_handler.py # NL scheduling → ScheduledJob (validate + create)
 │       ├── schemas.py            # Pydantic request/response models
 │       ├── models.py             # SQLAlchemy ORM (+ NotionSyncState, ScheduledJob)
 │       ├── database.py           # DB session management
@@ -180,6 +182,13 @@ except Exception:
 - Each job creates an `OrchestrationRun` via `create_run()` + `publish_run()` — same path as manual API calls
 - `auto_publish_notion` flag on job → auto-publishes report to Notion on completion
 
+### Natural Language Scheduling (UPCE Dialog Engine)
+- UPCE dialog engine의 `SCHEDULING` 인텐트가 자연어 시간 표현을 cron/interval로 변환
+- Stage 1 (Gemini JSON-mode)이 "매일 아침 9시" → `cron_expression: "0 9 * * *"` 직접 추출
+- `scheduling_handler.py`가 APScheduler CronTrigger로 LLM 출력을 deterministic 검증
+- 확인(confirmation) 시 `ScheduledJob` DB row 생성 → 기존 스케줄러가 자동 실행
+- 검증 실패 시 `SLOT_FILLING` 상태로 복귀하여 재입력 유도
+
 ### API Endpoints
 
 **Chat & Conversations:**
@@ -251,7 +260,7 @@ except Exception:
 ## Testing
 
 ```bash
-# All Python tests (63 tests — chat, dialog, notion, scheduler, upce)
+# All Python tests (96 tests — chat, dialog, notion, scheduler, scheduling, upce)
 PYTHONPATH=src python3 -m pytest tests/ -v
 
 # TypeScript type check
@@ -271,6 +280,7 @@ make qa-program
 ### Test Mocking Notes
 - Notion tests patch `ora_automation_api.notion_router.settings` directly (not `os.environ`)
 - Scheduler poll tests patch `ora_automation_api.queue.publish_run` (lazy import via `from . import queue as _queue`)
+- Scheduling intent tests use in-memory SQLite directly (no API mock needed — pure logic + DB)
 - All Notion API calls are mocked — no real API calls in tests
 
 ## Git Commit Rules
