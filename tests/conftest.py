@@ -19,6 +19,7 @@ from ora_automation_api.dialog_engine import (
     IntentType,
     MissingSlot,
     ResearchSlots,
+    SchedulingSlots,
     TestingSlots,
 )
 from ora_automation_api.schemas import ProjectInfo
@@ -158,6 +159,7 @@ def make_stage1_response(
     next_state: str = "idle",
     research_slots: dict | None = None,
     testing_slots: dict | None = None,
+    scheduling_slots: dict | None = None,
     needs_clarification: bool = False,
     missing_slots: list[dict] | None = None,
     proposed_plans: list[dict] | None = None,
@@ -174,6 +176,7 @@ def make_stage1_response(
         "next_state": next_state,
         "research_slots": research_slots,
         "testing_slots": testing_slots,
+        "scheduling_slots": scheduling_slots,
         "needs_clarification": needs_clarification,
         "missing_slots": missing_slots,
         "proposed_plans": proposed_plans,

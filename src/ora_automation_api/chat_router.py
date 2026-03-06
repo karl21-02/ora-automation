@@ -40,6 +40,7 @@ from .dialog_engine import (
     run_stage2_sync,
 )
 from .models import ChatConversation, ChatMessageRow
+from .scheduling_handler import ScheduleValidationError, create_scheduled_job_from_slots
 from .schemas import (
     ChatChoice,
     ChatMessageRead,
@@ -648,6 +649,43 @@ def _chat_upce(req: ChatRequest, db: Session) -> ChatResponse:
 
     # Short circuit: confirmation → no Stage 2 text needed
     if classification.is_confirmation and dialog_ctx.proposed_plans:
+        # ── Scheduling intent: create ScheduledJob instead of execution plan ──
+        if dialog_ctx.intent == IntentType.SCHEDULING:
+            try:
+                job = create_scheduled_job_from_slots(db, dialog_ctx.accumulated_slots)
+                hr = dialog_ctx.accumulated_slots.get("human_readable", "")
+                reply = f"스케줄이 등록되었습니다: **{job.name}** ({hr})"
+                _persist_message(db, conv.id, "user", req.message)
+                _persist_message(db, conv.id, "assistant", reply)
+                dialog_ctx = DialogContext()  # reset to IDLE
+                try:
+                    _save_dialog_context(db, conv, dialog_ctx, ctx_version)
+                except StaleDialogError:
+                    db.rollback()
+                    raise HTTPException(status_code=409, detail="Dialog context was modified concurrently. Please retry.")
+                db.commit()
+                return ChatResponse(
+                    reply=reply,
+                    dialog_state=DialogState.IDLE.value,
+                    confirmation_required=False,
+                )
+            except ScheduleValidationError as exc:
+                reply = f"스케줄 등록에 실패했습니다: {exc}\n다시 정보를 알려주세요."
+                dialog_ctx.state = DialogState.SLOT_FILLING
+                _persist_message(db, conv.id, "user", req.message)
+                _persist_message(db, conv.id, "assistant", reply)
+                try:
+                    _save_dialog_context(db, conv, dialog_ctx, ctx_version)
+                except StaleDialogError:
+                    db.rollback()
+                    raise HTTPException(status_code=409, detail="Dialog context was modified concurrently. Please retry.")
+                db.commit()
+                return ChatResponse(
+                    reply=reply,
+                    dialog_state=DialogState.SLOT_FILLING.value,
+                    confirmation_required=False,
+                )
+
         plan, plans = coerce_proposed_plans(dialog_ctx.proposed_plans)
         reply = "실행을 시작합니다."
         _persist_message(db, conv.id, "user", req.message)
@@ -765,6 +803,71 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
     def generate() -> Generator[str, None, None]:
         # Short circuit: confirmation
         if classification.is_confirmation and updated_ctx.proposed_plans:
+            # ── Scheduling intent: create ScheduledJob ──
+            if updated_ctx.intent == IntentType.SCHEDULING:
+                try:
+                    pdb = SessionLocal()
+                    try:
+                        job = create_scheduled_job_from_slots(pdb, updated_ctx.accumulated_slots)
+                        hr = updated_ctx.accumulated_slots.get("human_readable", "")
+                        reply = f"스케줄이 등록되었습니다: **{job.name}** ({hr})"
+                        token_data = json.dumps({"type": "token", "content": reply}, ensure_ascii=False)
+                        yield f"data: {token_data}\n\n"
+                        done_payload: dict[str, Any] = {
+                            "type": "done",
+                            "full_reply": reply,
+                            "dialog_state": DialogState.IDLE.value,
+                            "confirmation_required": False,
+                        }
+                        yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+                        yield "data: [DONE]\n\n"
+                        _persist_message(pdb, conv_id, "assistant", reply)
+                        pconv = pdb.get(ChatConversation, conv_id)
+                        if pconv:
+                            _save_dialog_context(pdb, pconv, DialogContext(), ctx_version)
+                        pdb.commit()
+                    finally:
+                        pdb.close()
+                except ScheduleValidationError as exc:
+                    reply = f"스케줄 등록에 실패했습니다: {exc}\n다시 정보를 알려주세요."
+                    token_data = json.dumps({"type": "token", "content": reply}, ensure_ascii=False)
+                    yield f"data: {token_data}\n\n"
+                    done_payload = {
+                        "type": "done",
+                        "full_reply": reply,
+                        "dialog_state": DialogState.SLOT_FILLING.value,
+                        "confirmation_required": False,
+                    }
+                    yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    try:
+                        pdb2 = SessionLocal()
+                        try:
+                            _persist_message(pdb2, conv_id, "assistant", reply)
+                            slot_ctx = DialogContext(
+                                state=DialogState.SLOT_FILLING,
+                                intent=updated_ctx.intent,
+                                accumulated_slots=updated_ctx.accumulated_slots,
+                                proposed_plans=updated_ctx.proposed_plans,
+                                turn_count=updated_ctx.turn_count,
+                            )
+                            pconv2 = pdb2.get(ChatConversation, conv_id)
+                            if pconv2:
+                                _save_dialog_context(pdb2, pconv2, slot_ctx, ctx_version)
+                            pdb2.commit()
+                        finally:
+                            pdb2.close()
+                    except Exception:
+                        logger.exception("Failed to persist scheduling validation error")
+                except Exception:
+                    logger.exception("Failed to create scheduled job (stream)")
+                    reply = "스케줄 등록 중 오류가 발생했습니다."
+                    token_data = json.dumps({"type": "token", "content": reply}, ensure_ascii=False)
+                    yield f"data: {token_data}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'full_reply': reply, 'dialog_state': DialogState.IDLE.value}, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                return
+
             plan, plans = coerce_proposed_plans(updated_ctx.proposed_plans)
             reply = "실행을 시작합니다."
             token_data = json.dumps({"type": "token", "content": reply}, ensure_ascii=False)

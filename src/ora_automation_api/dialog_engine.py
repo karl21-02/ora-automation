@@ -38,6 +38,7 @@ class DialogState(str, Enum):
 class IntentType(str, Enum):
     RESEARCH = "research"
     TESTING = "testing"
+    SCHEDULING = "scheduling"
     PROJECT_INQUIRY = "project_inquiry"
     REPORT_INQUIRY = "report_inquiry"
     MODIFY_PLAN = "modify_plan"
@@ -68,6 +69,17 @@ class TestingSlots(BaseModel):
     projects: list[str] | None = None
 
 
+class SchedulingSlots(BaseModel):
+    topic: str | None = None
+    frequency_type: str | None = None  # "cron" | "interval"
+    cron_expression: str | None = None  # "0 9 * * *"
+    interval_minutes: int | None = None  # 360
+    human_readable: str | None = None  # "매일 오전 9시"
+    target: str | None = None  # default: run-cycle
+    auto_publish: bool | None = None
+    projects: list[str] | None = None
+
+
 # ── Stage 1 Output ────────────────────────────────────────────────────
 
 
@@ -78,6 +90,7 @@ class IntentClassification(BaseModel):
     next_state: DialogState = DialogState.IDLE
     research_slots: ResearchSlots | None = None
     testing_slots: TestingSlots | None = None
+    scheduling_slots: SchedulingSlots | None = None
     needs_clarification: bool = True
     missing_slots: list[MissingSlot] | None = None
     proposed_plans: list[dict] | None = None
@@ -195,6 +208,7 @@ Turn count: {turn_count}
 ## Intent types
 - research: User wants R&D analysis (run-cycle, run-cycle-deep, etc.)
 - testing: User wants E2E testing or QA (e2e-service, e2e-service-all, qa-program)
+- scheduling: User wants to set up a recurring/scheduled analysis (e.g. "매일 아침 9시에 분석해줘", "6시간마다 보안 트렌드 분석")
 - project_inquiry: User asks about available projects
 - report_inquiry: User asks about reports or past results
 - modify_plan: User wants to change a proposed plan
@@ -215,11 +229,24 @@ Turn count: {turn_count}
 ## Required slots by intent
 - research: topic (REQUIRED), projects (optional but recommended), depth (optional), target (default: run-cycle)
 - testing: service (REQUIRED for e2e-service), scope (single/all), projects (optional)
+- scheduling: topic (REQUIRED), frequency_type (REQUIRED: "cron" or "interval"), cron_expression or interval_minutes (REQUIRED based on frequency_type), human_readable (REQUIRED: natural language description of schedule), target (optional, default: run-cycle), auto_publish (optional), projects (optional)
+
+## Schedule parsing rules
+Convert natural language time expressions to cron or interval:
+- "매일 아침 9시" / "every day at 9am" → frequency_type="cron", cron_expression="0 9 * * *"
+- "매일 오후 6시" / "daily at 6pm" → frequency_type="cron", cron_expression="0 18 * * *"
+- "매주 월요일 10시" / "every Monday at 10am" → frequency_type="cron", cron_expression="0 10 * * 1"
+- "평일 아침 8시" / "weekdays at 8am" → frequency_type="cron", cron_expression="0 8 * * 1-5"
+- "6시간마다" / "every 6 hours" → frequency_type="interval", interval_minutes=360
+- "30분마다" / "every 30 minutes" → frequency_type="interval", interval_minutes=30
+- "12시간마다" / "every 12 hours" → frequency_type="interval", interval_minutes=720
+Always set human_readable to a concise Korean description of the schedule (e.g. "매일 오전 9시", "6시간마다").
 
 ## Plan generation rules
 - Only set proposed_plans when next_state is CONFIRMING
 - For research: target=run-cycle, env.FOCUS=topic
 - For testing: target=e2e-service (or e2e-service-all), env.SERVICE=service
+- For scheduling: target=run-cycle (or user-specified), env.FOCUS=topic, include schedule_meta with frequency_type, cron_expression or interval_minutes, human_readable, and auto_publish
 - For multi-project: generate one plan per project with label=project_name
 - If depth is "deep" or "strict": set ORCHESTRATION_PROFILE=strict
 
@@ -243,6 +270,7 @@ Return EXACTLY this JSON structure (no extra keys, no markdown):
   "next_state": "<DialogState>",
   "research_slots": {{"topic": "...", "projects": [...], "depth": "...", "target": "..."}} | null,
   "testing_slots": {{"service": "...", "scope": "...", "projects": [...]}} | null,
+  "scheduling_slots": {{"topic": "...", "frequency_type": "cron|interval", "cron_expression": "...", "interval_minutes": N, "human_readable": "...", "target": "...", "auto_publish": bool, "projects": [...]}} | null,
   "needs_clarification": <bool>,
   "missing_slots": [{{"name": "...", "description": "..."}}] | null,
   "proposed_plans": [{{"target": "...", "env": {{}}, "label": "..."}}] | null,
@@ -336,6 +364,25 @@ def merge_slots(existing_ctx: DialogContext, classification: IntentClassificatio
         if ts.projects:
             new_slots["projects"] = ts.projects
 
+    if classification.scheduling_slots:
+        ss = classification.scheduling_slots
+        if ss.topic:
+            new_slots["topic"] = ss.topic
+        if ss.frequency_type:
+            new_slots["frequency_type"] = ss.frequency_type
+        if ss.cron_expression:
+            new_slots["cron_expression"] = ss.cron_expression
+        if ss.interval_minutes is not None:
+            new_slots["interval_minutes"] = ss.interval_minutes
+        if ss.human_readable:
+            new_slots["human_readable"] = ss.human_readable
+        if ss.target:
+            new_slots["target"] = ss.target
+        if ss.auto_publish is not None:
+            new_slots["auto_publish"] = ss.auto_publish
+        if ss.projects:
+            new_slots["projects"] = ss.projects
+
     # Reset on topic change / rejection
     if classification.is_rejection:
         new_slots = {}
@@ -390,6 +437,36 @@ def build_proposed_plans(
         else:
             label = projects[0] if projects else ""
             plans.append({"target": target, "env": env, "label": label})
+
+    elif intent_type == IntentType.SCHEDULING:
+        target = slots.get("target", "run-cycle")
+        env = {}
+        if slots.get("topic"):
+            env["FOCUS"] = slots["topic"]
+        schedule_meta: dict[str, Any] = {}
+        if slots.get("frequency_type"):
+            schedule_meta["frequency_type"] = slots["frequency_type"]
+        if slots.get("cron_expression"):
+            schedule_meta["cron_expression"] = slots["cron_expression"]
+        if slots.get("interval_minutes") is not None:
+            schedule_meta["interval_minutes"] = slots["interval_minutes"]
+        if slots.get("human_readable"):
+            schedule_meta["human_readable"] = slots["human_readable"]
+        if slots.get("auto_publish") is not None:
+            schedule_meta["auto_publish"] = slots["auto_publish"]
+        projects = slots.get("projects", [])
+        if projects and len(projects) > 1:
+            for proj in projects:
+                plans.append({
+                    "target": target, "env": {**env}, "label": proj,
+                    "schedule_meta": schedule_meta,
+                })
+        else:
+            label = projects[0] if projects else ""
+            plans.append({
+                "target": target, "env": env, "label": label,
+                "schedule_meta": schedule_meta,
+            })
 
     return plans
 
