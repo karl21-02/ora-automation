@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from typing import Literal
 
@@ -100,6 +101,7 @@ def dlq_name_for_role(role: AgentRole) -> str:
 
 
 _topology_declared: bool = False
+_publish_lock = threading.Lock()
 
 
 def _declare_topology(channel: pika.adapters.blocking_connection.BlockingChannel, force: bool = False) -> None:
@@ -181,9 +183,10 @@ def _with_channel_publish(
     last_error: Exception | None = None
     for attempt in range(max(1, retries)):
         try:
-            channel = _get_publish_channel()
-            _declare_topology(channel)
-            publisher(channel)
+            with _publish_lock:
+                channel = _get_publish_channel()
+                _declare_topology(channel)
+                publisher(channel)
             return
         except Exception as exc:  # pragma: no cover
             last_error = exc
@@ -191,14 +194,15 @@ def _with_channel_publish(
                 "RabbitMQ publish attempt %d/%d failed: %s",
                 attempt + 1, max(1, retries), exc,
             )
-            # Force reconnection and topology redeclaration on next attempt
-            _topology_declared = False
-            if _publish_conn is not None:
-                try:
-                    _publish_conn.close()
-                except Exception:
-                    logger.debug("Failed to close RabbitMQ connection during cleanup", exc_info=True)
-                _publish_conn = None
+            with _publish_lock:
+                # Force reconnection and topology redeclaration on next attempt
+                _topology_declared = False
+                if _publish_conn is not None:
+                    try:
+                        _publish_conn.close()
+                    except Exception:
+                        logger.debug("Failed to close RabbitMQ connection during cleanup", exc_info=True)
+                    _publish_conn = None
             if attempt + 1 < max(1, retries):
                 time.sleep(max(0.1, retry_delay))
     raise RuntimeError(f"rabbitmq publish failed: {last_error}")  # pragma: no cover
