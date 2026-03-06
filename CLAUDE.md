@@ -78,7 +78,7 @@ ora-automation/
 │   │   ├── consensus.py          # Final consensus with hard gates
 │   │   ├── research.py           # ArXiv/Crossref/OpenAlex clients
 │   │   ├── report_builder.py     # Markdown + JSON report gen
-│   │   └── personas/             # 20 YAML agent definitions
+│   │   └── personas/             # 24 YAML agent definitions (Toss silo structure)
 │   │
 │   └── ora_automation_api/       # FastAPI backend
 │       ├── main.py               # App entry, router registration, DDL migration
@@ -166,10 +166,14 @@ except Exception:
     result = legacy_hardcoded_logic(input_data)          # Fallback
 ```
 
-### Persona System
-- 20 YAML personas in `src/ora_rd_orchestrator/personas/`
-- Teams: strategy, product, engineering, research, qa, governance
+### Persona System (Toss Silo Structure)
+- 24 YAML personas in `src/ora_rd_orchestrator/personas/`
+- Mission silos: `research_intelligence`, `product_realization`, `platform_infrastructure`, `quality_assurance`, `strategy`, `governance`
+- 5 agents added: DataAnalyst, ProductDesigner, ComplianceOfficer, TechLead, GrowthHacker
+- UXVoiceDesigner removed (replaced by ProductDesigner)
+- ComplianceOfficer: governance gate (risk ≥ 7.0 + feasibility < 4.0 → veto)
 - `PersonaRegistry.to_agent_definitions()` bridges to legacy format
+- See `docs/TOSS_REORG_PLAN.md` for full reorganization plan
 
 ### Idempotent Sync (Notion)
 - `notion_sync_state` table tracks all Notion page/DB IDs with `(entity_type, entity_key)` unique constraint
