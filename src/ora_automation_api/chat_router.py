@@ -1286,11 +1286,16 @@ def list_reports() -> list[ReportListItem]:
 
 @router.get("/reports/{filename:path}")
 def get_report(filename: str) -> FileResponse:
-    if ".." in filename:
+    if ".." in filename or filename.startswith("/"):
         raise HTTPException(status_code=400, detail="invalid filename")
 
     for base_dir in _report_dirs():
-        candidate = base_dir / filename
+        candidate = (base_dir / filename).resolve()
+        # Path traversal 방어: resolve 후 base_dir 안에 있는지 확인
+        try:
+            candidate.relative_to(base_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid filename")
         if candidate.is_file() and candidate.suffix.lower() in (".md", ".json"):
             media_type = "text/markdown" if candidate.suffix.lower() == ".md" else "application/json"
             return FileResponse(str(candidate), media_type=media_type)
