@@ -137,9 +137,8 @@ def setup_notion(db: Session = Depends(get_db)) -> NotionSetupResponse:
             status="already_exists",
         )
 
+    client = NotionClient(token=token)
     try:
-        client = NotionClient(token=token)
-
         # 1. Hub page (workspace-level)
         if not hub:
             hub_page = client.create_page(
@@ -239,6 +238,8 @@ def setup_notion(db: Session = Depends(get_db)) -> NotionSetupResponse:
 
     except NotionAPIError as exc:
         raise HTTPException(status_code=exc.status_code or 502, detail=str(exc))
+    finally:
+        client.close()
 
 
 # ── POST /publish/{report_path} ──────────────────────────────────────
@@ -269,8 +270,8 @@ def publish_report(report_path: str, db: Session = Depends(get_db)) -> NotionPub
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to parse report: {exc}")
 
+    client = NotionClient(token=token)
     try:
-        client = NotionClient(token=token)
         publisher = NotionPublisher(
             client=client,
             reports_db_id=reports_db_id,
@@ -280,6 +281,8 @@ def publish_report(report_path: str, db: Session = Depends(get_db)) -> NotionPub
         result = publisher.publish_report(report_data, str(file_path))
     except NotionAPIError as exc:
         raise HTTPException(status_code=exc.status_code or 502, detail=str(exc))
+    finally:
+        client.close()
 
     # Record sync
     _save_sync(
@@ -310,12 +313,14 @@ def notion_status(db: Session = Depends(get_db)) -> NotionStatusResponse:
     if not token:
         return NotionStatusResponse(connected=False)
 
+    client = NotionClient(token=token)
     try:
-        client = NotionClient(token=token)
         user_info = client.check_connection()
         bot_name = user_info.get("name") or user_info.get("bot", {}).get("owner", {}).get("user", {}).get("name", "")
     except NotionAPIError:
         return NotionStatusResponse(connected=False)
+    finally:
+        client.close()
 
     # Count synced reports
     synced_reports = db.scalars(
@@ -359,35 +364,38 @@ def sync_all_reports(db: Session = Depends(get_db)) -> NotionSyncResponse:
     unsynced_files = [f for f in all_files if f.name not in synced_keys]
 
     client = NotionClient(token=token)
-    publisher = NotionPublisher(
-        client=client,
-        reports_db_id=reports_db_id,
-        topics_db_id=topics_db_id,
-        hub_page_id=hub_id,
-    )
+    try:
+        publisher = NotionPublisher(
+            client=client,
+            reports_db_id=reports_db_id,
+            topics_db_id=topics_db_id,
+            hub_page_id=hub_id,
+        )
 
-    synced: list[str] = []
-    skipped: list[str] = []
-    errors: list[dict] = []
+        synced: list[str] = []
+        skipped: list[str] = []
+        errors: list[dict] = []
 
-    for file_path in unsynced_files:
-        try:
-            report_data = json.loads(file_path.read_text(encoding="utf-8"))
-            result = publisher.publish_report(report_data, str(file_path))
-            _save_sync(
-                db,
-                "report",
-                file_path.name,
-                result["report_page_id"],
-                result.get("report_url"),
-                str(file_path),
-                {"topic_count": len(result.get("topic_pages", []))},
-            )
-            synced.append(file_path.name)
-        except NotionAPIError as exc:
-            errors.append({"file": file_path.name, "error": str(exc)})
-        except Exception as exc:
-            errors.append({"file": file_path.name, "error": str(exc)})
+        for file_path in unsynced_files:
+            try:
+                report_data = json.loads(file_path.read_text(encoding="utf-8"))
+                result = publisher.publish_report(report_data, str(file_path))
+                _save_sync(
+                    db,
+                    "report",
+                    file_path.name,
+                    result["report_page_id"],
+                    result.get("report_url"),
+                    str(file_path),
+                    {"topic_count": len(result.get("topic_pages", []))},
+                )
+                synced.append(file_path.name)
+            except NotionAPIError as exc:
+                errors.append({"file": file_path.name, "error": str(exc)})
+            except Exception as exc:
+                errors.append({"file": file_path.name, "error": str(exc)})
+    finally:
+        client.close()
 
     return NotionSyncResponse(
         synced=synced,

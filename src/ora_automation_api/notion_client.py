@@ -24,7 +24,13 @@ class NotionAPIError(Exception):
 
 
 class NotionClient:
-    """Low-level Notion REST API wrapper with automatic retry."""
+    """Low-level Notion REST API wrapper with automatic retry.
+
+    Supports use as a context manager to ensure the HTTP session is closed::
+
+        with NotionClient() as client:
+            client.create_page(...)
+    """
 
     def __init__(
         self,
@@ -41,6 +47,16 @@ class NotionClient:
                 "Content-Type": "application/json",
             }
         )
+
+    def __enter__(self) -> "NotionClient":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the underlying HTTP session."""
+        self._session.close()
 
     def _request(
         self,
