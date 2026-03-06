@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_ALLOWED_TARGETS = (
@@ -133,6 +136,41 @@ class Settings:
         self.scheduler_poll_seconds = int(
             os.getenv("ORA_SCHEDULER_POLL_SECONDS", "60").strip()
         )
+
+        self._validate()
+
+    def _validate(self) -> None:
+        """Clamp or warn on out-of-range settings."""
+        if self.default_timeout_seconds <= 0:
+            logger.warning("default_timeout_seconds=%s invalid, using 3600", self.default_timeout_seconds)
+            self.default_timeout_seconds = 3600.0
+
+        if self.heartbeat_interval_seconds <= 0:
+            logger.warning("heartbeat_interval_seconds=%s invalid, using 2.0", self.heartbeat_interval_seconds)
+            self.heartbeat_interval_seconds = 2.0
+
+        if self.stale_timeout_seconds <= 0:
+            logger.warning("stale_timeout_seconds=%s invalid, using 120.0", self.stale_timeout_seconds)
+            self.stale_timeout_seconds = 120.0
+
+        if self.default_max_attempts < 1:
+            logger.warning("default_max_attempts=%s invalid, using 1", self.default_max_attempts)
+            self.default_max_attempts = 1
+
+        if self.scheduler_poll_seconds < 10:
+            logger.warning("scheduler_poll_seconds=%s below minimum 10, clamping to 10", self.scheduler_poll_seconds)
+            self.scheduler_poll_seconds = 10
+
+        if self.rabbitmq_prefetch < 1:
+            logger.warning("rabbitmq_prefetch=%s invalid, using 1", self.rabbitmq_prefetch)
+            self.rabbitmq_prefetch = 1
+
+        if self.default_target not in self.allowed_targets:
+            logger.warning(
+                "default_target=%r not in allowed_targets, adding it",
+                self.default_target,
+            )
+            self.allowed_targets = (*self.allowed_targets, self.default_target)
 
 
 settings = Settings()
