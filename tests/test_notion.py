@@ -5,7 +5,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -39,20 +39,6 @@ def mock_session():
 @pytest.fixture()
 def notion_client(mock_session):
     return NotionClient(token="ntn_test_token", api_version="2022-06-28")
-
-
-@pytest.fixture()
-def notion_db():
-    """In-memory SQLite with all tables."""
-    engine = create_engine("sqlite:///:memory:", echo=False)
-    Base.metadata.create_all(engine)
-    TestSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    session = TestSession()
-    try:
-        yield session
-    finally:
-        session.close()
-        engine.dispose()
 
 
 @pytest.fixture()
@@ -185,22 +171,26 @@ def test_client_raises_on_401(mock_session, notion_client):
 
 
 @patch("ora_automation_api.notion_router.NotionClient")
-def test_setup_creates_structure(MockClient, client):
+@patch("ora_automation_api.notion_router.settings")
+def test_setup_creates_structure(mock_settings, MockClient, client):
     """POST /notion/setup should create hub + 2 DBs + dashboard."""
+    mock_settings.notion_api_token = "ntn_test"
+    mock_settings.notion_api_version = "2022-06-28"
+
     mock_instance = MagicMock()
     MockClient.return_value = mock_instance
 
-    created_ids = iter(["hub-id", "rdb-id", "tdb-id", "dash-id"])
+    page_ids = iter(["hub-id", "dash-id"])
+    db_ids = iter(["rdb-id", "tdb-id"])
     def mock_create_page(**kwargs):
-        return {"id": next(created_ids), "url": "https://notion.so/test"}
+        return {"id": next(page_ids), "url": "https://notion.so/test"}
     def mock_create_database(**kwargs):
-        return {"id": next(created_ids), "url": "https://notion.so/test"}
+        return {"id": next(db_ids), "url": "https://notion.so/test"}
 
     mock_instance.create_page.side_effect = mock_create_page
     mock_instance.create_database.side_effect = mock_create_database
 
-    with patch.dict(os.environ, {"NOTION_API_TOKEN": "ntn_test"}):
-        resp = client.post("/api/v1/notion/setup")
+    resp = client.post("/api/v1/notion/setup")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -212,8 +202,12 @@ def test_setup_creates_structure(MockClient, client):
 
 
 @patch("ora_automation_api.notion_router.NotionClient")
-def test_setup_idempotent(MockClient, client):
+@patch("ora_automation_api.notion_router.settings")
+def test_setup_idempotent(mock_settings, MockClient, client):
     """Second setup call should return existing IDs."""
+    mock_settings.notion_api_token = "ntn_test"
+    mock_settings.notion_api_version = "2022-06-28"
+
     mock_instance = MagicMock()
     MockClient.return_value = mock_instance
 
@@ -228,23 +222,28 @@ def test_setup_idempotent(MockClient, client):
     mock_instance.create_page.side_effect = mock_create_page
     mock_instance.create_database.side_effect = mock_create_database
 
-    with patch.dict(os.environ, {"NOTION_API_TOKEN": "ntn_test"}):
-        resp1 = client.post("/api/v1/notion/setup")
-        resp2 = client.post("/api/v1/notion/setup")
+    resp1 = client.post("/api/v1/notion/setup")
+    resp2 = client.post("/api/v1/notion/setup")
 
     assert resp2.status_code == 200
     data2 = resp2.json()
     assert data2["status"] == "already_exists"
-    # IDs should be the same
     assert resp1.json()["hub_page_id"] == data2["hub_page_id"]
 
 
 # ── Publish endpoint tests ────────────────────────────────────────────
 
 
+@patch("ora_automation_api.notion_router._resolve_report_path")
 @patch("ora_automation_api.notion_router.NotionClient")
-def test_publish_report(MockClient, client, tmp_path):
+@patch("ora_automation_api.notion_router.settings")
+def test_publish_report(mock_settings, MockClient, mock_resolve, client, tmp_path):
     """POST /notion/publish should create report row + detail + topics."""
+    mock_settings.notion_api_token = "ntn_test"
+    mock_settings.notion_api_version = "2022-06-28"
+    mock_settings.run_output_dir = tmp_path
+    mock_settings.automation_root = tmp_path
+
     mock_instance = MagicMock()
     MockClient.return_value = mock_instance
 
@@ -261,16 +260,15 @@ def test_publish_report(MockClient, client, tmp_path):
     mock_instance.append_blocks.return_value = {}
 
     # First setup
-    with patch.dict(os.environ, {"NOTION_API_TOKEN": "ntn_test"}):
-        client.post("/api/v1/notion/setup")
+    resp_setup = client.post("/api/v1/notion/setup")
+    assert resp_setup.status_code == 200
 
     # Write test report
     report_file = tmp_path / "test_report.json"
     report_file.write_text(json.dumps(SAMPLE_REPORT), encoding="utf-8")
+    mock_resolve.return_value = report_file
 
-    with patch.dict(os.environ, {"NOTION_API_TOKEN": "ntn_test"}):
-        with patch("ora_automation_api.notion_router._resolve_report_path", return_value=report_file):
-            resp = client.post("/api/v1/notion/publish/test_report.json")
+    resp = client.post("/api/v1/notion/publish/test_report.json")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -278,10 +276,12 @@ def test_publish_report(MockClient, client, tmp_path):
     assert "report_page_id" in data
 
 
-def test_publish_without_setup_fails(client):
+@patch("ora_automation_api.notion_router.settings")
+def test_publish_without_setup_fails(mock_settings, client):
     """Publish without setup should return 400."""
-    with patch.dict(os.environ, {"NOTION_API_TOKEN": "ntn_test"}):
-        resp = client.post("/api/v1/notion/publish/nonexistent.json")
+    mock_settings.notion_api_token = "ntn_test"
+
+    resp = client.post("/api/v1/notion/publish/nonexistent.json")
     assert resp.status_code == 400
     assert "setup" in resp.json()["detail"].lower()
 
@@ -290,24 +290,30 @@ def test_publish_without_setup_fails(client):
 
 
 @patch("ora_automation_api.notion_router.NotionClient")
-def test_status_connected(MockClient, client):
+@patch("ora_automation_api.notion_router.settings")
+def test_status_connected(mock_settings, MockClient, client):
     """GET /notion/status with valid token should return connected=true."""
+    mock_settings.notion_api_token = "ntn_test"
+    mock_settings.run_output_dir = Path("/nonexistent")
+    mock_settings.automation_root = Path("/nonexistent")
+
     mock_instance = MagicMock()
     MockClient.return_value = mock_instance
     mock_instance.check_connection.return_value = {"name": "TestBot"}
 
-    with patch.dict(os.environ, {"NOTION_API_TOKEN": "ntn_test"}):
-        resp = client.get("/api/v1/notion/status")
+    resp = client.get("/api/v1/notion/status")
 
     assert resp.status_code == 200
     data = resp.json()
     assert data["connected"] is True
 
 
-def test_status_no_token(client):
+@patch("ora_automation_api.notion_router.settings")
+def test_status_no_token(mock_settings, client):
     """GET /notion/status without token should return connected=false."""
-    with patch.dict(os.environ, {"NOTION_API_TOKEN": ""}):
-        resp = client.get("/api/v1/notion/status")
+    mock_settings.notion_api_token = ""
+
+    resp = client.get("/api/v1/notion/status")
     assert resp.status_code == 200
     assert resp.json()["connected"] is False
 

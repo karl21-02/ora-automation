@@ -68,7 +68,7 @@ def scheduler_db():
     TestSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     session = TestSession()
     try:
-        yield session
+        yield session, sessionmaker(bind=engine, autoflush=False, autocommit=False)
     finally:
         session.close()
         engine.dispose()
@@ -133,8 +133,8 @@ def test_delete_job(client):
     assert get_resp.status_code == 404
 
 
-@patch("ora_automation_api.scheduler_router.publish_run")
-@patch("ora_automation_api.scheduler_router.pick_agent_role", return_value="engineer")
+@patch("ora_automation_api.queue.publish_run")
+@patch("ora_automation_api.queue.pick_agent_role", return_value="engineer")
 def test_manual_trigger(mock_role, mock_publish, client):
     """POST /jobs/{id}/run should create and enqueue a run."""
     create_resp = client.post("/api/v1/scheduler/jobs", json={
@@ -153,12 +153,12 @@ def test_manual_trigger(mock_role, mock_publish, client):
 # ── Poll logic tests ──────────────────────────────────────────────────
 
 
-@patch("ora_automation_api.scheduler.publish_run")
-@patch("ora_automation_api.scheduler.pick_agent_role", return_value="engineer")
-def test_poll_executes_due_jobs(mock_role, mock_publish, scheduler_db):
+def test_poll_executes_due_jobs(scheduler_db):
     """_poll_scheduled_jobs should execute jobs where next_run_at <= now."""
     from uuid import uuid4
     from ora_automation_api.scheduler import OraScheduler
+
+    session, SessionFactory = scheduler_db
 
     job = ScheduledJob(
         id=str(uuid4()),
@@ -169,14 +169,16 @@ def test_poll_executes_due_jobs(mock_role, mock_publish, scheduler_db):
         enabled=True,
         next_run_at=datetime.utcnow() - timedelta(minutes=5),
     )
-    scheduler_db.add(job)
-    scheduler_db.commit()
+    session.add(job)
+    session.commit()
 
-    SessionFactory = sessionmaker(bind=scheduler_db.get_bind())
     scheduler = OraScheduler(SessionFactory)
-    scheduler._poll_scheduled_jobs()
 
-    scheduler_db.refresh(job)
+    with patch("ora_automation_api.queue.publish_run"), \
+         patch("ora_automation_api.queue.pick_agent_role", return_value="engineer"):
+        scheduler._poll_scheduled_jobs()
+
+    session.refresh(job)
     assert job.last_run_status is not None
     assert job.next_run_at is not None
     assert job.next_run_at > datetime.utcnow()
@@ -187,6 +189,8 @@ def test_poll_skips_disabled(scheduler_db):
     from uuid import uuid4
     from ora_automation_api.scheduler import OraScheduler
 
+    session, SessionFactory = scheduler_db
+
     job = ScheduledJob(
         id=str(uuid4()),
         name="Disabled Job",
@@ -196,14 +200,13 @@ def test_poll_skips_disabled(scheduler_db):
         enabled=False,
         next_run_at=datetime.utcnow() - timedelta(minutes=5),
     )
-    scheduler_db.add(job)
-    scheduler_db.commit()
+    session.add(job)
+    session.commit()
 
-    SessionFactory = sessionmaker(bind=scheduler_db.get_bind())
     scheduler = OraScheduler(SessionFactory)
     scheduler._poll_scheduled_jobs()
 
-    scheduler_db.refresh(job)
+    session.refresh(job)
     assert job.last_run_status is None  # Not executed
 
 
@@ -235,4 +238,8 @@ def test_cron_next_run():
 
     next_run = OraScheduler._calculate_next_run(job)
     assert next_run is not None
-    assert next_run > datetime.utcnow()
+    # CronTrigger may return tz-aware datetime; just verify it's in the future
+    now = datetime.utcnow()
+    # Make comparison work for both naive and aware datetimes
+    next_run_naive = next_run.replace(tzinfo=None) if next_run.tzinfo else next_run
+    assert next_run_naive > now

@@ -137,18 +137,7 @@ def setup_notion(db: Session = Depends(get_db)) -> NotionSetupResponse:
         client = NotionClient(token=token)
 
         # 1. Hub page (workspace-level)
-        hub_page = client.create_page(
-            parent={"type": "page_id", "page_id": ""},
-            properties={"title": [{"text": {"content": "Ora R&D Hub"}}]},
-            icon={"emoji": "\U0001f680"},
-        ) if not hub else {"id": hub.notion_page_id}
-
-        # For workspace-level page, we use the Notion databases API
-        # which allows creating at workspace level
-        hub_page_id = hub.notion_page_id if hub else hub_page["id"]
-
         if not hub:
-            # Actually create workspace-level page properly
             hub_page = client.create_page(
                 parent={"workspace": True},
                 properties={"title": [{"text": {"content": "Ora R&D Hub"}}]},
@@ -156,6 +145,8 @@ def setup_notion(db: Session = Depends(get_db)) -> NotionSetupResponse:
             )
             hub_page_id = hub_page["id"]
             _save_sync(db, "hub_page", "singleton", hub_page_id, hub_page.get("url"))
+        else:
+            hub_page_id = hub.notion_page_id
 
         # 2. R&D Reports database
         if not reports_db:

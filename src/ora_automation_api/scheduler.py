@@ -70,7 +70,7 @@ class OraScheduler:
             db.close()
 
     def _execute_job(self, db: Session, job: ScheduledJob) -> None:
-        from .queue import pick_agent_role, publish_run
+        from . import queue as _queue
         from .schemas import OrchestrationRunCreate
         from .service import create_run
 
@@ -85,8 +85,8 @@ class OraScheduler:
 
         if created and run.status != "dry-run":
             try:
-                role = pick_agent_role(run.target, run.agent_role)
-                publish_run(run.id, role=role, target=run.target)
+                role = _queue.pick_agent_role(run.target, run.agent_role)
+                _queue.publish_run(run.id, role=role, target=run.target)
             except Exception as exc:
                 logger.error("Scheduler: queue enqueue failed for job %s: %s", job.id, exc)
                 run.status = "error"
