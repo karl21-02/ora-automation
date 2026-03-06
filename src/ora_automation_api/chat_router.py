@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import ssl
+import threading
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -232,19 +233,22 @@ def _call_gemini(system_prompt: str, contents: list[dict]) -> str:
 _project_cache: list[ProjectInfo] | None = None
 _project_cache_time: float = 0.0
 _PROJECT_CACHE_TTL = 60.0  # seconds
+_cache_lock = threading.Lock()
 
 
 def _scan_projects() -> list[ProjectInfo]:
     global _project_cache, _project_cache_time
     now = time.monotonic()
-    if _project_cache is not None and now - _project_cache_time < _PROJECT_CACHE_TTL:
-        return _project_cache
+    with _cache_lock:
+        if _project_cache is not None and now - _project_cache_time < _PROJECT_CACHE_TTL:
+            return _project_cache
 
     root = settings.projects_root
     if not root.is_dir():
-        _project_cache = []
-        _project_cache_time = now
-        return _project_cache
+        with _cache_lock:
+            _project_cache = []
+            _project_cache_time = time.monotonic()
+            return _project_cache
     projects: list[ProjectInfo] = []
     for entry in sorted(root.iterdir()):
         if not entry.is_dir():
@@ -258,8 +262,9 @@ def _scan_projects() -> list[ProjectInfo]:
             has_makefile=(entry / "Makefile").is_file(),
             has_dockerfile=(entry / "Dockerfile").is_file() or (entry / "docker-compose.yml").is_file(),
         ))
-    _project_cache = projects
-    _project_cache_time = now
+    with _cache_lock:
+        _project_cache = projects
+        _project_cache_time = time.monotonic()
     return projects
 
 
@@ -270,8 +275,9 @@ _system_prompt_cache_time: float = 0.0
 def _build_system_prompt() -> str:
     global _system_prompt_cache, _system_prompt_cache_time
     now = time.monotonic()
-    if _system_prompt_cache is not None and now - _system_prompt_cache_time < _PROJECT_CACHE_TTL:
-        return _system_prompt_cache
+    with _cache_lock:
+        if _system_prompt_cache is not None and now - _system_prompt_cache_time < _PROJECT_CACHE_TTL:
+            return _system_prompt_cache
 
     projects = _scan_projects()
     if projects:
@@ -284,8 +290,9 @@ def _build_system_prompt() -> str:
         allowed_targets=", ".join(sorted(ALLOWED_TARGETS)),
         allowed_env_keys=", ".join(sorted(ALLOWED_ENV_KEYS)),
     )
-    _system_prompt_cache = result
-    _system_prompt_cache_time = now
+    with _cache_lock:
+        _system_prompt_cache = result
+        _system_prompt_cache_time = time.monotonic()
     return result
 
 
