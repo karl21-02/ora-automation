@@ -7,6 +7,7 @@ import re
 import ssl
 import time
 from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -63,6 +64,20 @@ router = APIRouter(prefix="/api/v1", tags=["chat"])
 class StaleDialogError(Exception):
     """Raised when dialog_context optimistic lock fails (concurrent update)."""
     pass
+
+
+@contextmanager
+def _session_scope() -> Generator[Session, None, None]:
+    """Open a SessionLocal, commit on success, always close."""
+    db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 # Pre-compiled regex patterns
 _RE_JSON_BLOCK = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
@@ -810,28 +825,25 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
             # ── Scheduling intent: create ScheduledJob ──
             if updated_ctx.intent == IntentType.SCHEDULING:
                 try:
-                    pdb = SessionLocal()
-                    try:
+                    with _session_scope() as pdb:
                         job = create_scheduled_job_from_slots(pdb, updated_ctx.accumulated_slots)
-                        hr = updated_ctx.accumulated_slots.get("human_readable", "")
-                        reply = f"스케줄이 등록되었습니다: **{job.name}** ({hr})"
-                        token_data = json.dumps({"type": "token", "content": reply}, ensure_ascii=False)
-                        yield f"data: {token_data}\n\n"
-                        done_payload: dict[str, Any] = {
-                            "type": "done",
-                            "full_reply": reply,
-                            "dialog_state": DialogState.IDLE.value,
-                            "confirmation_required": False,
-                        }
-                        yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
-                        yield "data: [DONE]\n\n"
+                    hr = updated_ctx.accumulated_slots.get("human_readable", "")
+                    reply = f"스케줄이 등록되었습니다: **{job.name}** ({hr})"
+                    token_data = json.dumps({"type": "token", "content": reply}, ensure_ascii=False)
+                    yield f"data: {token_data}\n\n"
+                    done_payload: dict[str, Any] = {
+                        "type": "done",
+                        "full_reply": reply,
+                        "dialog_state": DialogState.IDLE.value,
+                        "confirmation_required": False,
+                    }
+                    yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    with _session_scope() as pdb:
                         _persist_message(pdb, conv_id, "assistant", reply)
                         pconv = pdb.get(ChatConversation, conv_id)
                         if pconv:
                             _save_dialog_context(pdb, pconv, DialogContext(), ctx_version)
-                        pdb.commit()
-                    finally:
-                        pdb.close()
                 except ScheduleValidationError as exc:
                     reply = f"스케줄 등록에 실패했습니다: {exc}\n다시 정보를 알려주세요."
                     token_data = json.dumps({"type": "token", "content": reply}, ensure_ascii=False)
@@ -845,8 +857,7 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
                     yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
                     yield "data: [DONE]\n\n"
                     try:
-                        pdb2 = SessionLocal()
-                        try:
+                        with _session_scope() as pdb2:
                             _persist_message(pdb2, conv_id, "assistant", reply)
                             slot_ctx = DialogContext(
                                 state=DialogState.SLOT_FILLING,
@@ -858,9 +869,6 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
                             pconv2 = pdb2.get(ChatConversation, conv_id)
                             if pconv2:
                                 _save_dialog_context(pdb2, pconv2, slot_ctx, ctx_version)
-                            pdb2.commit()
-                        finally:
-                            pdb2.close()
                     except Exception:
                         logger.exception("Failed to persist scheduling validation error")
                 except Exception:
@@ -890,8 +898,7 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
             yield "data: [DONE]\n\n"
             # Persist
             try:
-                pdb = SessionLocal()
-                try:
+                with _session_scope() as pdb:
                     _persist_message(pdb, conv_id, "assistant", reply, plan=plan, plans=plans)
                     exec_ctx = DialogContext(
                         state=DialogState.EXECUTING,
@@ -903,9 +910,6 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
                     pconv = pdb.get(ChatConversation, conv_id)
                     if pconv:
                         _save_dialog_context(pdb, pconv, exec_ctx, ctx_version)
-                    pdb.commit()
-                finally:
-                    pdb.close()
             except StaleDialogError:
                 logger.warning("Stale dialog context on confirmation persist (stream)")
             except Exception:
@@ -925,15 +929,11 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
             yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
             try:
-                pdb = SessionLocal()
-                try:
+                with _session_scope() as pdb:
                     _persist_message(pdb, conv_id, "assistant", reply)
                     pconv = pdb.get(ChatConversation, conv_id)
                     if pconv:
                         _save_dialog_context(pdb, pconv, DialogContext(), ctx_version)
-                    pdb.commit()
-                finally:
-                    pdb.close()
             except StaleDialogError:
                 logger.warning("Stale dialog context on rejection persist (stream)")
             except Exception:
@@ -988,8 +988,7 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
 
         # Persist assistant reply + dialog context
         try:
-            pdb = SessionLocal()
-            try:
+            with _session_scope() as pdb:
                 _persist_message(
                     pdb, conv_id, "assistant", full_text,
                     plan=plan, plans=plans_list, project_select=project_select,
@@ -997,9 +996,6 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
                 pconv = pdb.get(ChatConversation, conv_id)
                 if pconv:
                     _save_dialog_context(pdb, pconv, updated_ctx, ctx_version)
-                pdb.commit()
-            finally:
-                pdb.close()
         except StaleDialogError:
             logger.warning("Stale dialog context on stream persist")
         except Exception:
@@ -1133,12 +1129,8 @@ def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> StreamingRes
 
         # Persist assistant reply after streaming completes
         try:
-            persist_db = SessionLocal()
-            try:
+            with _session_scope() as persist_db:
                 _persist_message(persist_db, conv_id, "assistant", reply, plan=plan, plans=plans, choices=choices, project_select=project_select)
-                persist_db.commit()
-            finally:
-                persist_db.close()
         except Exception:
             logger.exception("Failed to persist streamed assistant message")
 
