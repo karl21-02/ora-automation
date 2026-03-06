@@ -21,20 +21,40 @@ Key capabilities:
 └─────────────┘     └────┬─────┘     └────────────┘
                          │
                     ┌────┴─────┐
-                    │ RabbitMQ │
-                    │  :5672   │
-                    └────┬─────┘
-              ┌──────────┼──────────┐
-              ▼          ▼          ▼
-         worker-ceo  worker-pm  worker-{researcher,engineer,qa}
+                    │ RabbitMQ │      ┌────────────┐
+                    │  :5672   │      │ Notion API │
+                    └────┬─────┘      └─────┬──────┘
+              ┌──────────┼──────────┐       │
+              ▼          ▼          ▼       │
+         worker-ceo  worker-pm  worker-*    │
+              │                             │
+              ▼                             │
+         ┌──────────────┐    ┌──────────────┘
+         │  Scheduler   │───>│ auto-publish
+         │ (APScheduler)│    │ on completion
+         └──────────────┘    └──────────────
+```
+
+### Autonomous Pipeline
+
+```
+Scheduler (poll DB) ──> create_run() ──> RabbitMQ ──> Worker
+                                                        │
+                                                   run completed?
+                                                   & auto_publish?
+                                                        │
+                                                        ▼
+                                                  Notion Publisher
+                                                  (report → pages)
 ```
 
 ## Tech Stack
 
-- **Backend**: Python 3.10+, FastAPI, SQLAlchemy 2, Pydantic 2, RabbitMQ (pika)
+- **Backend**: Python 3.10+, FastAPI, SQLAlchemy 2, Pydantic 2, RabbitMQ (pika), APScheduler
 - **Frontend**: React 19, TypeScript 5.9, Vite 7
 - **Database**: PostgreSQL 16
 - **LLM**: Google Gemini (Vertex AI) — primary; OpenAI — fallback scripts
+- **External**: Notion API (report publishing)
 - **Infrastructure**: Docker Compose (8 services), Make
 
 ## Project Structure
@@ -60,13 +80,18 @@ ora-automation/
 │   │   └── personas/             # 20 YAML agent definitions
 │   │
 │   └── ora_automation_api/       # FastAPI backend
-│       ├── main.py               # App entry, router registration
+│       ├── main.py               # App entry, router registration, DDL migration
 │       ├── chat_router.py        # Chat + conversations + reports + projects
+│       ├── notion_client.py      # Notion REST API client (retry, backoff)
+│       ├── notion_publisher.py   # Report JSON → Notion pages/blocks
+│       ├── notion_router.py      # Notion endpoints (setup, publish, sync, status)
+│       ├── scheduler.py          # APScheduler DB-polling job scheduler
+│       ├── scheduler_router.py   # Scheduler CRUD API
 │       ├── schemas.py            # Pydantic request/response models
-│       ├── models.py             # SQLAlchemy ORM models
+│       ├── models.py             # SQLAlchemy ORM (+ NotionSyncState, ScheduledJob)
 │       ├── database.py           # DB session management
 │       ├── config.py             # API settings (env vars)
-│       ├── service.py            # Run execution logic
+│       ├── service.py            # Run execution logic + auto-publish hook
 │       ├── queue.py              # RabbitMQ message routing
 │       ├── worker.py             # Agent worker process
 │       └── llm_planner.py        # LLM plan adapter
@@ -77,7 +102,8 @@ ora-automation/
 │       ├── components/
 │       │   ├── Sidebar.tsx       # Conversation list, search, date groups
 │       │   ├── ChatWindow.tsx    # Message display + input
-│       │   └── MessageBubble.tsx # Single message rendering
+│       │   ├── MessageBubble.tsx # Single message rendering
+│       │   └── SchedulerPanel.tsx # Scheduled job management UI
 │       ├── lib/api.ts            # Typed API client
 │       └── types.ts              # Shared TypeScript types
 │
@@ -143,6 +169,17 @@ except Exception:
 - Teams: strategy, product, engineering, research, qa, governance
 - `PersonaRegistry.to_agent_definitions()` bridges to legacy format
 
+### Idempotent Sync (Notion)
+- `notion_sync_state` table tracks all Notion page/DB IDs with `(entity_type, entity_key)` unique constraint
+- Setup, publish, sync endpoints all check existing state before creating — safe to call repeatedly
+- Entity types: `hub_page`, `reports_db`, `topics_db`, `dashboard_page`, `report`, `topic`
+
+### DB-backed Scheduler
+- `scheduled_jobs` table stores job definitions (interval or cron, target, env, enabled flag)
+- APScheduler `BackgroundScheduler` polls every N seconds for due jobs
+- Each job creates an `OrchestrationRun` via `create_run()` + `publish_run()` — same path as manual API calls
+- `auto_publish_notion` flag on job → auto-publishes report to Notion on completion
+
 ### API Endpoints
 
 **Chat & Conversations:**
@@ -159,6 +196,18 @@ except Exception:
 - `GET /api/v1/reports` — List research reports
 - `GET /api/v1/reports/{filename}` — Download report
 - `GET /api/v1/projects` — List Ora sub-projects
+
+**Notion Integration:**
+- `POST /api/v1/notion/setup` — Create Hub + DBs in Notion (idempotent)
+- `POST /api/v1/notion/publish/{path}` — Publish report to Notion (idempotent)
+- `GET /api/v1/notion/status` — Connection & sync status
+- `POST /api/v1/notion/sync` — Bulk-publish all unsynced reports
+
+**Scheduler:**
+- `POST /api/v1/scheduler/jobs` — Create scheduled job
+- `GET /api/v1/scheduler/jobs` — List all jobs
+- `GET/PATCH/DELETE /api/v1/scheduler/jobs/{id}` — Get/update/delete job
+- `POST /api/v1/scheduler/jobs/{id}/run` — Manual trigger
 
 **Health:**
 - `GET /health` — API health check
@@ -182,6 +231,15 @@ except Exception:
 - `DEBATE_ROUNDS` — Number of debate rounds (default: 2)
 - `TOP` — Number of top strategies to analyze (default: 6)
 
+### Notion Integration
+- `NOTION_API_TOKEN` — Notion internal integration token
+- `NOTION_API_VERSION` — API version (default: `2022-06-28`)
+- `NOTION_AUTO_PUBLISH` — Auto-publish on run completion (`1`/`true` to enable)
+
+### Scheduler
+- `ORA_SCHEDULER_ENABLED` — Enable background scheduler (`1`/`true` to enable)
+- `ORA_SCHEDULER_POLL_SECONDS` — DB poll interval (default: `60`, min: `10`)
+
 ## Development Notes
 
 - Use `python3`, not `python` (venv is Python 3.10)
@@ -193,6 +251,9 @@ except Exception:
 ## Testing
 
 ```bash
+# All Python tests (63 tests — chat, dialog, notion, scheduler, upce)
+PYTHONPATH=src python3 -m pytest tests/ -v
+
 # TypeScript type check
 cd frontend && npx tsc --noEmit
 
@@ -206,6 +267,11 @@ PYTHONPATH=src python3 -c "from ora_automation_api.config import settings; print
 make e2e-service SERVICE=ai
 make qa-program
 ```
+
+### Test Mocking Notes
+- Notion tests patch `ora_automation_api.notion_router.settings` directly (not `os.environ`)
+- Scheduler poll tests patch `ora_automation_api.queue.publish_run` (lazy import via `from . import queue as _queue`)
+- All Notion API calls are mocked — no real API calls in tests
 
 ## Git Commit Rules
 
