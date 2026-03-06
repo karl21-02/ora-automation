@@ -2659,9 +2659,6 @@ def _consensus_hard_gate(topic_item: dict, state: TopicState) -> tuple[bool, str
         return False, "연구 근거와 실행성 모두 낮아 합의 보류"
     if feature["feasibility"] < 3.2 and state.code_hits < LLM_CONSENSUS_MIN_CODE_DOC_SIGNAL:
         return False, "실행 근거가 충분치 않음"
-    # ComplianceOfficer gate: block topics with extreme risk + low feasibility
-    if feature["risk_penalty"] >= 7.0 and feature["feasibility"] < 4.0:
-        return False, "컴플라이언스 게이트: 고위험 + 낮은 실행성으로 거부"
     return True, "통과"
 
 
