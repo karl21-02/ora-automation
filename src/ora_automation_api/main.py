@@ -157,10 +157,98 @@ def _run_ddl_migrations() -> None:
             conn.execute(text(stmt))
 
 
+def _seed_preset_org() -> None:
+    """Seed the default preset organization from YAML persona files (idempotent)."""
+    import logging
+
+    _logger = logging.getLogger(__name__)
+    db = SessionLocal()
+    try:
+        from .models import Organization, OrganizationAgent
+
+        PRESET_NAME = "Default (Toss Silo)"
+        existing = db.query(Organization).filter(Organization.name == PRESET_NAME).first()
+        if existing:
+            return
+
+        from uuid import uuid4
+
+        from ora_rd_orchestrator.config import (
+            AGENT_FINAL_WEIGHTS,
+            FLAT_MODE_AGENTS,
+            default_persona_dir,
+        )
+
+        persona_dir = default_persona_dir()
+        if not persona_dir.is_dir():
+            _logger.warning("Persona directory not found for seeding: %s", persona_dir)
+            return
+
+        from ora_rd_orchestrator.personas import _load_yaml
+
+        org_id = uuid4().hex[:36]
+        org = Organization(
+            id=org_id,
+            name=PRESET_NAME,
+            description="기본 Toss 사일로 구조 (24 에이전트). 수정 불가, 복제 가능.",
+            is_preset=True,
+            teams={},
+            flat_mode_agents=sorted(FLAT_MODE_AGENTS),
+            agent_final_weights=AGENT_FINAL_WEIGHTS,
+        )
+        db.add(org)
+        db.flush()
+
+        teams_set: dict[str, list[str]] = {}
+        yaml_files = sorted(persona_dir.glob("*.yaml")) + sorted(persona_dir.glob("*.yml"))
+        for idx, yaml_path in enumerate(yaml_files):
+            try:
+                data = _load_yaml(yaml_path)
+                agent_id = data.get("agent_id", "")
+                if not agent_id:
+                    continue
+                team = data.get("team", "")
+                if team:
+                    teams_set.setdefault(team, []).append(agent_id)
+                agent = OrganizationAgent(
+                    id=uuid4().hex[:36],
+                    org_id=org_id,
+                    agent_id=agent_id,
+                    display_name=data.get("display_name", agent_id),
+                    display_name_ko=data.get("display_name_ko", data.get("display_name", agent_id)),
+                    role=data.get("role", ""),
+                    tier=int(data.get("tier", 1)),
+                    domain=data.get("domain") or None,
+                    team=team,
+                    personality=data.get("personality", {}),
+                    behavioral_directives=data.get("behavioral_directives", []),
+                    constraints=data.get("constraints", []),
+                    decision_focus=data.get("decision_focus", []),
+                    weights=data.get("weights", {}),
+                    trust_map=data.get("trust_map", {}),
+                    system_prompt_template=data.get("system_prompt_template"),
+                    enabled=True,
+                    sort_order=idx,
+                )
+                db.add(agent)
+            except Exception:
+                _logger.exception("Failed to seed agent from %s", yaml_path)
+
+        org.teams = teams_set
+        db.commit()
+        _logger.info("Seeded preset org '%s' with agents from %d YAML files", PRESET_NAME, len(yaml_files))
+    except Exception:
+        _logger.exception("Failed to seed preset organization")
+        db.rollback()
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 def startup() -> None:
     Base.metadata.create_all(bind=engine)
     _run_ddl_migrations()
+    _seed_preset_org()
     settings.run_output_dir.mkdir(parents=True, exist_ok=True)
 
     if settings.scheduler_enabled:

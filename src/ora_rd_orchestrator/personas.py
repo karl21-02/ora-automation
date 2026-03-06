@@ -108,6 +108,37 @@ class PersonaRegistry:
         self._personas: dict[str, AgentPersona] = {}
         self._loaded = False
 
+    @classmethod
+    def from_agent_dicts(cls, agents: list[dict[str, Any]]) -> "PersonaRegistry":
+        """Create a PersonaRegistry from a list of agent config dicts (DB rows).
+
+        Each dict should contain the same keys as a YAML persona file:
+        agent_id, display_name, display_name_ko, role, tier, domain, team,
+        personality, behavioral_directives, constraints, decision_focus,
+        weights, trust_map, system_prompt_template.
+        """
+        registry = cls.__new__(cls)
+        registry._persona_dir = Path("/dev/null")
+        registry._personas = {}
+        registry._loaded = True
+
+        for agent_data in agents:
+            if not agent_data.get("agent_id"):
+                continue
+            if not agent_data.get("enabled", True):
+                continue
+            try:
+                persona = _parse_persona(agent_data)
+                registry._personas[persona.agent_id] = persona
+            except Exception:
+                logger.exception(
+                    "Failed to parse agent dict for %s",
+                    agent_data.get("agent_id", "unknown"),
+                )
+
+        logger.info("Created PersonaRegistry from %d agent dicts", len(registry._personas))
+        return registry
+
     # -- Loading --------------------------------------------------------
 
     def load_all(self) -> dict[str, AgentPersona]:
