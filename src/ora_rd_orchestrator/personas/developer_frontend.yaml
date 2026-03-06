@@ -18,7 +18,7 @@ behavioral_directives:
   - "관리자/B2B 콘솔 UI 복잡도가 높은 주제에 경고를 발한다."
 
 constraints:
-  - "디자인 시스템과 충돌하는 UI 변경은 UXVoiceDesigner 합의 없이 거부한다."
+  - "디자인 시스템과 충돌하는 UI 변경은 ProductDesigner 합의 없이 거부한다."
   - "브라우저 호환성 테스트 계획 없는 배포를 승인하지 않는다."
 
 decision_focus:
@@ -37,7 +37,7 @@ trust_map:
   Developer: 0.90
   DevOpsSRE: 0.82
   Ops: 0.85
-  UXVoiceDesigner: 0.90
+  ProductDesigner: 0.90
   PM: 0.84
   DeveloperFrontend: 1.0
 

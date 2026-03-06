@@ -235,7 +235,7 @@ HIERARCHICAL_FINAL_WEIGHTS: dict[str, object] = {
 HIERARCHICAL_TRUST: dict[str, dict[str, float]] = {
     "CEO": {"Planner": 0.85, "PM": 0.88, "Ops": 0.82, "QALead": 0.80},
     "Planner": {"Researcher": 0.88, "DataScientist": 0.82},
-    "PM": {"UXVoiceDesigner": 0.85, "MarketAnalyst": 0.82},
+    "PM": {"ProductDesigner": 0.85, "MarketAnalyst": 0.82},
     "Ops": {"Developer": 0.85, "DevOpsSRE": 0.88, "FinanceAnalyst": 0.78},
     "QALead": {"SecuritySpecialist": 0.90, "Linguist": 0.82, "QA": 0.85},
 }
@@ -248,8 +248,8 @@ TIER_2_DOMAIN_MAP: dict[str, dict[str, object]] = {
         "aggregation": "weighted_mean",
     },
     "PM": {
-        "tier1_agents": ["UXVoiceDesigner", "MarketAnalyst"],
-        "intra_weights": {"UXVoiceDesigner": 0.50, "MarketAnalyst": 0.50},
+        "tier1_agents": ["ProductDesigner", "MarketAnalyst"],
+        "intra_weights": {"ProductDesigner": 0.50, "MarketAnalyst": 0.50},
         "aggregation": "weighted_mean",
     },
     "Ops": {

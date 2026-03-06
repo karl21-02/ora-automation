@@ -944,7 +944,7 @@ def as_markdown(
         "Linguist": "언어학자(Linguist)",
         "MarketAnalyst": "시장분석가(Market)",
         "FinanceAnalyst": "재무분석가(Finance)",
-        "UXVoiceDesigner": "음성UX설계(VoiceUX)",
+        "ProductDesigner": "프로덕트디자이너(PD)",
         "DataScientist": "데이터사이언티스트(DS)",
         "DevOpsSRE": "데브옵스(DevOps/SRE)",
         "QALead": "QA팀장(QALead)",

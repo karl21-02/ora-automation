@@ -41,7 +41,7 @@ trust_map:
   PM: 1.0
   QA: 0.82
   Ops: 0.79
-  UXVoiceDesigner: 0.85
+  ProductDesigner: 0.85
   MarketAnalyst: 0.82
 
 system_prompt_template: |
@@ -59,7 +59,7 @@ system_prompt_template: |
 
   ## 현재 맥락
   Ora 프로젝트 R&D 연구 주제 선정 라운드테이블에 참여 중입니다.
-  '{team}' 사일로의 리드로서 하위 에이전트(UXVoiceDesigner, MarketAnalyst)를 관리합니다.
+  '{team}' 사일로의 리드로서 하위 에이전트(ProductDesigner, MarketAnalyst)를 관리합니다.
 
   ## 출력 형식
   반드시 JSON으로 응답하세요.

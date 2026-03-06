@@ -479,7 +479,7 @@ def _challenges_finance_by_cost(state: "TopicState", features: dict[str, float])
     return _feature_value(features, "feasibility") < 4.0 and _feature_value(features, "risk_penalty") >= 5.0
 
 
-# --- UXVoiceDesigner support/challenge ---
+# --- ProductDesigner support/challenge ---
 def _supports_ux_by_impact(state: "TopicState", features: dict[str, float]) -> bool:
     return _feature_value(features, "impact") >= 6.0 and state.keyword_hits >= 4
 
@@ -737,22 +737,22 @@ AGENT_DEFINITIONS: dict[str, dict[str, object]] = {
         "tier": 1,
         "domain": "Ops",
     },
-    "UXVoiceDesigner": {
-        "objective": "음성 UX 설계, 대화 흐름, 사용자 체감 품질 평가",
+    "ProductDesigner": {
+        "objective": "제품 UX/UI 설계, 사용자 여정, 디자인 시스템 평가",
         "weights": {
             "impact": 0.40,
-            "novelty": 0.20,
-            "feasibility": 0.20,
-            "research_signal": 0.15,
-            "risk": 0.05,
+            "novelty": 0.15,
+            "feasibility": 0.25,
+            "research_signal": 0.10,
+            "risk": 0.10,
         },
         "supports": [_supports_ux_by_impact],
         "challenges": [_challenges_ux_by_low_impact],
-        "trust": {"PM": 0.88, "Planner": 0.82, "Researcher": 0.78, "UXVoiceDesigner": 1.0},
+        "trust": {"PM": 0.92, "DeveloperFrontend": 0.88, "Developer": 0.80, "ProductDesigner": 1.0},
         "decision_focus": [
-            "음성 대화 흐름 자연스러움",
-            "사용자 만족도 개선 가능성",
-            "접근성/포용성 설계",
+            "사용자 체감 개선도",
+            "디자인 시스템 일관성",
+            "접근성 및 사용성 테스트 가능성",
         ],
         "tier": 1,
         "domain": "PM",
@@ -864,8 +864,8 @@ TIER_2_DOMAIN_MAP: dict[str, dict[str, object]] = {
         "aggregation": "weighted_mean",
     },
     "PM": {
-        "tier1_agents": ["UXVoiceDesigner", "MarketAnalyst"],
-        "intra_weights": {"UXVoiceDesigner": 0.50, "MarketAnalyst": 0.50},
+        "tier1_agents": ["ProductDesigner", "MarketAnalyst"],
+        "intra_weights": {"ProductDesigner": 0.50, "MarketAnalyst": 0.50},
         "aggregation": "weighted_mean",
     },
     "Ops": {
@@ -897,7 +897,7 @@ HIERARCHICAL_FINAL_WEIGHTS: dict[str, object] = {
 HIERARCHICAL_TRUST: dict[str, dict[str, float]] = {
     "CEO": {"Planner": 0.85, "PM": 0.88, "Ops": 0.82, "QALead": 0.80},
     "Planner": {"Researcher": 0.88, "DataScientist": 0.82},
-    "PM": {"UXVoiceDesigner": 0.85, "MarketAnalyst": 0.82},
+    "PM": {"ProductDesigner": 0.85, "MarketAnalyst": 0.82},
     "Ops": {"Developer": 0.85, "DevOpsSRE": 0.88, "FinanceAnalyst": 0.78},
     "QALead": {"SecuritySpecialist": 0.90, "Linguist": 0.82, "QA": 0.85},
 }
@@ -3470,7 +3470,7 @@ def _as_markdown(
         "Linguist": "언어학자(Linguist)",
         "MarketAnalyst": "시장분석가(Market)",
         "FinanceAnalyst": "재무분석가(Finance)",
-        "UXVoiceDesigner": "음성UX설계(VoiceUX)",
+        "ProductDesigner": "프로덕트디자이너(PD)",
         "DataScientist": "데이터사이언티스트(DS)",
         "DevOpsSRE": "데브옵스(DevOps/SRE)",
         "QALead": "QA팀장(QALead)",
