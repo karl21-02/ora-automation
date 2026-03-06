@@ -45,6 +45,7 @@ interface Props {
   onSelectReport: (filename: string) => void
   onDeleteConversation: (id: string) => void
   onRenameConversation: (id: string, title: string) => void
+  onOpenOrgs?: () => void
 }
 
 export default function Sidebar({
@@ -55,9 +56,10 @@ export default function Sidebar({
   onSelectReport,
   onDeleteConversation,
   onRenameConversation,
+  onOpenOrgs,
 }: Props) {
   const [reports, setReports] = useState<ReportListItem[]>([])
-  const [tab, setTab] = useState<'chats' | 'reports'>('chats')
+  const [tab, setTab] = useState<'chats' | 'reports' | 'orgs'>('chats')
   const [searchQuery, setSearchQuery] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
@@ -157,10 +159,13 @@ export default function Sidebar({
         display: 'flex',
         borderBottom: '1px solid #e5e7eb',
       }}>
-        {(['chats', 'reports'] as const).map((t) => (
+        {(['chats', 'reports', 'orgs'] as const).map((t) => (
           <button
             key={t}
-            onClick={() => setTab(t)}
+            onClick={() => {
+              setTab(t)
+              if (t === 'orgs' && onOpenOrgs) onOpenOrgs()
+            }}
             style={{
               flex: 1,
               padding: '8px 0',
@@ -173,7 +178,7 @@ export default function Sidebar({
               cursor: 'pointer',
             }}
           >
-            {t === 'chats' ? 'Chats' : 'Reports'}
+            {t === 'chats' ? 'Chats' : t === 'reports' ? 'Reports' : 'Orgs'}
           </button>
         ))}
       </div>

@@ -1,4 +1,4 @@
-import type { ChatChoice, ChatPlan, ChatResponse, OrchestrationEvent, OrchestrationRun, ProjectInfo, ReportListItem, ScheduledJob, ScheduledJobCreate } from '../types'
+import type { ChatChoice, ChatPlan, ChatResponse, OrgAgent, OrchestrationEvent, OrchestrationRun, Organization, OrganizationDetail, ProjectInfo, ReportListItem, ScheduledJob, ScheduledJobCreate } from '../types'
 
 const BASE = '/api/v1'
 
@@ -215,4 +215,77 @@ export async function triggerScheduledJob(id: string): Promise<OrchestrationRun>
   return request<OrchestrationRun>(`${BASE}/scheduler/jobs/${id}/run`, {
     method: 'POST',
   })
+}
+
+// ── Organizations ──────────────────────────────────────────────────
+
+export async function listOrgs(): Promise<{ items: Organization[]; total: number }> {
+  return request<{ items: Organization[]; total: number }>(`${BASE}/orgs`)
+}
+
+export async function getOrg(orgId: string): Promise<OrganizationDetail> {
+  return request<OrganizationDetail>(`${BASE}/orgs/${orgId}`)
+}
+
+export async function createOrg(data: {
+  name: string
+  description?: string
+  teams?: Record<string, string[]>
+  flat_mode_agents?: string[]
+  agent_final_weights?: Record<string, number>
+}): Promise<OrganizationDetail> {
+  return request<OrganizationDetail>(`${BASE}/orgs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateOrg(orgId: string, data: Partial<{
+  name: string
+  description: string
+  teams: Record<string, string[]>
+  flat_mode_agents: string[]
+  agent_final_weights: Record<string, number>
+}>): Promise<Organization> {
+  return request<Organization>(`${BASE}/orgs/${orgId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteOrg(orgId: string): Promise<void> {
+  await fetch(`${BASE}/orgs/${orgId}`, { method: 'DELETE' })
+}
+
+export async function cloneOrg(orgId: string, data: {
+  name: string
+  description?: string
+}): Promise<OrganizationDetail> {
+  return request<OrganizationDetail>(`${BASE}/orgs/${orgId}/clone`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function createAgent(orgId: string, data: Omit<OrgAgent, 'id' | 'org_id' | 'created_at' | 'updated_at'>): Promise<OrgAgent> {
+  return request<OrgAgent>(`${BASE}/orgs/${orgId}/agents`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateAgent(orgId: string, agentId: string, data: Partial<OrgAgent>): Promise<OrgAgent> {
+  return request<OrgAgent>(`${BASE}/orgs/${orgId}/agents/${agentId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteAgent(orgId: string, agentId: string): Promise<void> {
+  await fetch(`${BASE}/orgs/${orgId}/agents/${agentId}`, { method: 'DELETE' })
 }

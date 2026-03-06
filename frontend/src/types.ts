@@ -121,3 +121,44 @@ export interface ScheduledJobCreate {
   enabled?: boolean
   auto_publish_notion?: boolean
 }
+
+// ── Organizations ──────────────────────────────────────────────────
+
+export interface OrgAgent {
+  id: string
+  org_id: string
+  agent_id: string
+  display_name: string
+  display_name_ko: string
+  role: string
+  tier: number
+  domain: string | null
+  team: string
+  personality: Record<string, string>
+  behavioral_directives: string[]
+  constraints: string[]
+  decision_focus: string[]
+  weights: Record<string, number>
+  trust_map: Record<string, number>
+  system_prompt_template: string | null
+  enabled: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Organization {
+  id: string
+  name: string
+  description: string | null
+  is_preset: boolean
+  teams: Record<string, string[]>
+  flat_mode_agents: string[]
+  agent_final_weights: Record<string, number>
+  created_at: string
+  updated_at: string
+}
+
+export interface OrganizationDetail extends Organization {
+  agents: OrgAgent[]
+}

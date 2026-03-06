@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import ChatWindow from './components/ChatWindow'
+import OrgPanel from './components/OrgPanel'
 import ReportViewer from './components/ReportViewer'
 import Sidebar from './components/Sidebar'
 import { createConversation, deleteConversation, getConversation, listConversations, renameConversation } from './lib/api'
@@ -20,6 +21,7 @@ export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeId, setActiveId] = useState<string>('')
   const [reportFile, setReportFile] = useState<string | null>(null)
+  const [showOrgs, setShowOrgs] = useState(false)
   const [dbReady, setDbReady] = useState(false)
 
   // Load conversations from DB on mount
@@ -208,19 +210,24 @@ export default function App() {
       <Sidebar
         conversations={conversations}
         activeConversationId={activeId}
-        onSelectConversation={setActiveId}
-        onNewConversation={handleNewConversation}
-        onSelectReport={setReportFile}
+        onSelectConversation={(id) => { setShowOrgs(false); setActiveId(id) }}
+        onNewConversation={() => { setShowOrgs(false); handleNewConversation() }}
+        onSelectReport={(f) => { setShowOrgs(false); setReportFile(f) }}
         onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}
+        onOpenOrgs={() => setShowOrgs(true)}
       />
-      <ChatWindow
-        key={activeConv.id}
-        messages={activeConv.messages}
-        onNewMessage={handleNewMessage}
-        onUpdateMessage={handleUpdateMessage}
-        conversationId={activeConv.id}
-      />
+      {showOrgs ? (
+        <OrgPanel />
+      ) : (
+        <ChatWindow
+          key={activeConv.id}
+          messages={activeConv.messages}
+          onNewMessage={handleNewMessage}
+          onUpdateMessage={handleUpdateMessage}
+          conversationId={activeConv.id}
+        />
+      )}
       {reportFile && (
         <ReportViewer
           filename={reportFile}
