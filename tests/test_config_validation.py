@@ -69,3 +69,39 @@ class TestSettingsValidation:
         assert len(config_warnings) == 0
         assert s.default_timeout_seconds == 3600.0
         assert s.scheduler_poll_seconds == 60
+
+
+class TestCredentialWarnings:
+    """Warn when DATABASE_URL or RABBITMQ_URL use hardcoded defaults."""
+
+    def test_missing_database_url_warns(self, caplog):
+        from ora_automation_api.config import Settings
+
+        env = {"ORA_AUTOMATION_ROOT": "/tmp/ora-test", "RABBITMQ_URL": "amqp://x@y:5672/%2F"}
+        with caplog.at_level(logging.WARNING, logger="ora_automation_api.config"):
+            with patch.dict("os.environ", env, clear=True):
+                Settings()
+        assert any("DATABASE_URL not set" in m for m in caplog.messages)
+
+    def test_missing_rabbitmq_url_warns(self, caplog):
+        from ora_automation_api.config import Settings
+
+        env = {"ORA_AUTOMATION_ROOT": "/tmp/ora-test", "DATABASE_URL": "sqlite:///:memory:"}
+        with caplog.at_level(logging.WARNING, logger="ora_automation_api.config"):
+            with patch.dict("os.environ", env, clear=True):
+                Settings()
+        assert any("RABBITMQ_URL not set" in m for m in caplog.messages)
+
+    def test_both_set_no_credential_warnings(self, caplog):
+        from ora_automation_api.config import Settings
+
+        env = {
+            "ORA_AUTOMATION_ROOT": "/tmp/ora-test",
+            "DATABASE_URL": "postgresql://x:y@db:5432/test",
+            "RABBITMQ_URL": "amqp://x:y@mq:5672/%2F",
+        }
+        with caplog.at_level(logging.WARNING, logger="ora_automation_api.config"):
+            with patch.dict("os.environ", env, clear=True):
+                Settings()
+        assert not any("DATABASE_URL not set" in m for m in caplog.messages)
+        assert not any("RABBITMQ_URL not set" in m for m in caplog.messages)

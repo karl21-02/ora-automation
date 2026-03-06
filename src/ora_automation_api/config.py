@@ -141,6 +141,17 @@ class Settings:
 
     def _validate(self) -> None:
         """Clamp or warn on out-of-range settings."""
+        if not os.getenv("DATABASE_URL"):
+            logger.warning(
+                "DATABASE_URL not set, using built-in default with hardcoded credentials — "
+                "set DATABASE_URL explicitly for production"
+            )
+        if not os.getenv("RABBITMQ_URL"):
+            logger.warning(
+                "RABBITMQ_URL not set, using built-in default with hardcoded credentials — "
+                "set RABBITMQ_URL explicitly for production"
+            )
+
         if self.default_timeout_seconds <= 0:
             logger.warning("default_timeout_seconds=%s invalid, using 3600", self.default_timeout_seconds)
             self.default_timeout_seconds = 3600.0
