@@ -948,6 +948,10 @@ def as_markdown(
         "DataScientist": "데이터사이언티스트(DS)",
         "DevOpsSRE": "데브옵스(DevOps/SRE)",
         "QALead": "QA팀장(QALead)",
+        "DataAnalyst": "데이터분석가(DA)",
+        "TechLead": "테크리드(TL)",
+        "GrowthHacker": "그로스해커(Growth)",
+        "ComplianceOfficer": "컴플라이언스(Compliance)",
     }
     orchestration_stages = _normalize_stages(orchestration_stages, fallback=ORCHESTRATION_STAGES_DEFAULT)
     pipeline_decisions = pipeline_decisions or []

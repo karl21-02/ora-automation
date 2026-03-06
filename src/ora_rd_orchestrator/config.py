@@ -204,17 +204,21 @@ QA_GATE_THRESHOLD_DEFAULT = 3.5
 QA_GATE_PENALTY = 0.10
 
 # Legacy flat-mode agent set
-FLAT_MODE_AGENTS = {"CEO", "Planner", "Developer", "Researcher", "PM", "Ops", "QA"}
+FLAT_MODE_AGENTS = {"CEO", "Planner", "Developer", "Researcher", "PM", "Ops", "QA", "DataAnalyst", "TechLead", "GrowthHacker"}
 
 # Legacy flat-mode final weights
 AGENT_FINAL_WEIGHTS = {
-    "CEO": 0.25,
-    "Planner": 0.17,
-    "Developer": 0.16,
-    "Researcher": 0.15,
-    "PM": 0.12,
-    "Ops": 0.10,
-    "QA": 0.05,
+    "CEO": 0.20,
+    "Planner": 0.14,
+    "Developer": 0.12,
+    "Researcher": 0.12,
+    "PM": 0.10,
+    "Ops": 0.08,
+    "QA": 0.04,
+    "DataAnalyst": 0.06,
+    "TechLead": 0.06,
+    "GrowthHacker": 0.05,
+    "ComplianceOfficer": 0.03,
 }
 
 # Hierarchical final weights
@@ -233,28 +237,28 @@ HIERARCHICAL_FINAL_WEIGHTS: dict[str, object] = {
 
 # Hierarchical trust map
 HIERARCHICAL_TRUST: dict[str, dict[str, float]] = {
-    "CEO": {"Planner": 0.85, "PM": 0.88, "Ops": 0.82, "QALead": 0.80},
-    "Planner": {"Researcher": 0.88, "DataScientist": 0.82},
-    "PM": {"ProductDesigner": 0.85, "MarketAnalyst": 0.82},
-    "Ops": {"Developer": 0.85, "DevOpsSRE": 0.88, "FinanceAnalyst": 0.78},
+    "CEO": {"Planner": 0.85, "PM": 0.88, "Ops": 0.82, "QALead": 0.80, "ComplianceOfficer": 0.78},
+    "Planner": {"Researcher": 0.88, "DataScientist": 0.82, "DataAnalyst": 0.85},
+    "PM": {"ProductDesigner": 0.85, "MarketAnalyst": 0.82, "TechLead": 0.86},
+    "Ops": {"Developer": 0.85, "DevOpsSRE": 0.88, "FinanceAnalyst": 0.78, "GrowthHacker": 0.80},
     "QALead": {"SecuritySpecialist": 0.90, "Linguist": 0.82, "QA": 0.85},
 }
 
 # Tier 2 domain map
 TIER_2_DOMAIN_MAP: dict[str, dict[str, object]] = {
     "Planner": {
-        "tier1_agents": ["Researcher", "DataScientist"],
-        "intra_weights": {"Researcher": 0.55, "DataScientist": 0.45},
+        "tier1_agents": ["Researcher", "DataScientist", "DataAnalyst"],
+        "intra_weights": {"Researcher": 0.40, "DataScientist": 0.35, "DataAnalyst": 0.25},
         "aggregation": "weighted_mean",
     },
     "PM": {
-        "tier1_agents": ["ProductDesigner", "MarketAnalyst"],
-        "intra_weights": {"ProductDesigner": 0.50, "MarketAnalyst": 0.50},
+        "tier1_agents": ["ProductDesigner", "MarketAnalyst", "TechLead"],
+        "intra_weights": {"ProductDesigner": 0.35, "MarketAnalyst": 0.35, "TechLead": 0.30},
         "aggregation": "weighted_mean",
     },
     "Ops": {
-        "tier1_agents": ["Developer", "DevOpsSRE", "FinanceAnalyst"],
-        "intra_weights": {"Developer": 0.40, "DevOpsSRE": 0.35, "FinanceAnalyst": 0.25},
+        "tier1_agents": ["Developer", "DevOpsSRE", "FinanceAnalyst", "GrowthHacker"],
+        "intra_weights": {"Developer": 0.30, "DevOpsSRE": 0.30, "FinanceAnalyst": 0.20, "GrowthHacker": 0.20},
         "aggregation": "weighted_mean",
     },
     "QALead": {
