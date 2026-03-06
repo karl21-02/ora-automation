@@ -656,7 +656,8 @@ def execute_run(
         db.commit()
         _try_auto_publish_notion(run.id, db)
         return ExecutionOutcome(run_id=run.id, target=run.target, agent_role=agent_role, status="completed", fail_label="")
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:  # pragma: no cover  # noqa: BLE001 — top-level safety net
+        logger.exception("Unexpected error executing run %s", run_id)
         run = db.get(OrchestrationRun, run_id)
         if run:
             run.status = "error"

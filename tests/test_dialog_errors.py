@@ -206,3 +206,57 @@ class TestStaleDialogVersion:
         finally:
             db.close()
             engine.dispose()
+
+
+# ── _get_dialog_context corrupted data ─────────────────────────────
+
+
+class TestGetDialogContextCorruptedData:
+    """_get_dialog_context logs a warning and resets to IDLE on bad data."""
+
+    def test_corrupted_dict_returns_idle(self):
+        """Unparseable dialog_context dict → fallback to fresh DialogContext."""
+        conv = ChatConversation(id="corrupt-1", title="test")
+        conv.dialog_context = {"state": "NONEXISTENT_STATE", "intent": 12345}
+        conv.dialog_context_version = 3
+
+        ctx, ver = _get_dialog_context(conv)
+
+        assert ver == 3
+        assert ctx.state == DialogState.IDLE
+        assert ctx.intent is None
+
+    def test_corrupted_dict_logs_warning(self, caplog):
+        """Corrupted dialog_context → warning log emitted."""
+        import logging
+
+        conv = ChatConversation(id="corrupt-2", title="test")
+        conv.dialog_context = {"state": "INVALID"}
+        conv.dialog_context_version = 1
+
+        with caplog.at_level(logging.WARNING, logger="ora_automation_api.chat_router"):
+            _get_dialog_context(conv)
+
+        assert any("Failed to parse dialog_context" in msg for msg in caplog.messages)
+
+    def test_none_context_returns_fresh(self):
+        """None dialog_context → fresh DialogContext with version 0."""
+        conv = ChatConversation(id="none-ctx", title="test")
+        conv.dialog_context = None
+        conv.dialog_context_version = None
+
+        ctx, ver = _get_dialog_context(conv)
+
+        assert ver == 0
+        assert ctx.state == DialogState.IDLE
+
+    def test_non_dict_context_returns_fresh(self):
+        """Non-dict dialog_context (e.g. a string) → fresh DialogContext."""
+        conv = ChatConversation(id="str-ctx", title="test")
+        conv.dialog_context = "not a dict"
+        conv.dialog_context_version = 2
+
+        ctx, ver = _get_dialog_context(conv)
+
+        assert ver == 2
+        assert ctx.state == DialogState.IDLE

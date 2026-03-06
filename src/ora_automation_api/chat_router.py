@@ -603,8 +603,12 @@ def _get_dialog_context(conv: ChatConversation) -> tuple[DialogContext, int]:
     if conv.dialog_context and isinstance(conv.dialog_context, dict):
         try:
             return DialogContext.model_validate(conv.dialog_context), version
-        except Exception:
-            pass
+        except (ValueError, TypeError, KeyError) as exc:
+            logger.warning(
+                "Failed to parse dialog_context for conversation %s (version %d), "
+                "resetting to IDLE: %s",
+                conv.id, version, exc,
+            )
     return DialogContext(), version
 
 

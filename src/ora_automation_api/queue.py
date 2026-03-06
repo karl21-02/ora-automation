@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Literal
 
 import pika
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 
 AgentRole = Literal[
@@ -184,13 +187,17 @@ def _with_channel_publish(
             return
         except Exception as exc:  # pragma: no cover
             last_error = exc
+            logger.warning(
+                "RabbitMQ publish attempt %d/%d failed: %s",
+                attempt + 1, max(1, retries), exc,
+            )
             # Force reconnection and topology redeclaration on next attempt
             _topology_declared = False
             if _publish_conn is not None:
                 try:
                     _publish_conn.close()
                 except Exception:
-                    pass
+                    logger.debug("Failed to close RabbitMQ connection during cleanup", exc_info=True)
                 _publish_conn = None
             if attempt + 1 < max(1, retries):
                 time.sleep(max(0.1, retry_delay))
