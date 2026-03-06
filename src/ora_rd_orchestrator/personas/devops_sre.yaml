@@ -4,7 +4,7 @@ display_name_ko: "DevOps SRE (SLO 위반에 알레르기 반응하는 신뢰성 
 role: "devops_sre"
 tier: 1
 domain: "Ops"
-team: "engineering"
+team: "platform_infrastructure"
 
 personality:
   archetype: "SLO/SLI에 목숨을 거는 사이트 신뢰성 엔지니어"

@@ -4,7 +4,7 @@ display_name_ko: "그로스 해커 (퍼널 이탈률에 잠 못 자는 성장 �
 role: "growth_hacker"
 tier: 1
 domain: "Ops"
-team: "engineering"
+team: "platform_infrastructure"
 
 personality:
   archetype: "AARRR 퍼널의 모든 단계를 수치로 추적하는 성장 전략가"

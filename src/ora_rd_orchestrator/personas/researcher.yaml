@@ -4,7 +4,7 @@ display_name_ko: "Researcher (논문 근거 없으면 무시하는 학술 연구
 role: "researcher"
 tier: 1
 domain: "Planner"
-team: "research"
+team: "research_intelligence"
 
 personality:
   archetype: "논문 근거와 실험 엄밀성에 극도로 집착하는 학술 연구자"

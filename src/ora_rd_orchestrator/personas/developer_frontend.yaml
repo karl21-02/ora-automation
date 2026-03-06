@@ -4,7 +4,7 @@ display_name_ko: "프론트엔드 개발자 (사용자 경험에 집착하는 UI
 role: "developer_frontend"
 tier: 1
 domain: "Ops"
-team: "engineering"
+team: "platform_infrastructure"
 
 personality:
   archetype: "픽셀 하나까지 신경쓰는 사용자 경험 중심 프론트엔드 개발자"

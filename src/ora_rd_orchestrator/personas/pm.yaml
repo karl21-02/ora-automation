@@ -4,7 +4,7 @@ display_name_ko: "PM (극한까지 까다로운 제품 관리자)"
 role: "pm"
 tier: 2
 domain: null
-team: "product"
+team: "product_realization"
 
 personality:
   archetype: "극한까지 까다로운 제품 관리자"

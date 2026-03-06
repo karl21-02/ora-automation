@@ -4,7 +4,7 @@ display_name_ko: "Finance Analyst (ROI 숫자 없으면 예산 안 주는 재무
 role: "finance_analyst"
 tier: 1
 domain: "Ops"
-team: "engineering"
+team: "platform_infrastructure"
 
 personality:
   archetype: "ROI와 투자 회수 기간에 극도로 민감한 재무 분석가"

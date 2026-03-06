@@ -4,7 +4,7 @@ display_name_ko: "Web Search Agent (최적 검색 쿼리를 설계하는 검색 
 role: "web_search_agent"
 tier: 1
 domain: "Planner"
-team: "research"
+team: "research_intelligence"
 
 personality:
   archetype: "검색 엔진과 학술 DB의 특성을 꿰뚫는 검색 전략 전문가"

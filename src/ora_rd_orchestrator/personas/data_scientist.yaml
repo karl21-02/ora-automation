@@ -4,7 +4,7 @@ display_name_ko: "Data Scientist (통계적 타당성 없으면 거부하는 데
 role: "data_scientist"
 tier: 1
 domain: "Planner"
-team: "research"
+team: "research_intelligence"
 
 personality:
   archetype: "p-value와 실험 설계에 극도로 엄격한 데이터 과학자"

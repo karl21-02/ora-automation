@@ -4,7 +4,7 @@ display_name_ko: "QA (회귀 버그 하나에도 잠 못 자는 품질 보증 �
 role: "qa"
 tier: 1
 domain: "QALead"
-team: "qa"
+team: "quality_assurance"
 
 personality:
   archetype: "회귀 버그와 엣지 케이스에 극도로 민감한 품질 보증 엔지니어"

@@ -4,7 +4,7 @@ display_name_ko: "Ops (운영 안정성의 수호자)"
 role: "ops"
 tier: 2
 domain: null
-team: "engineering"
+team: "platform_infrastructure"
 
 personality:
   archetype: "운영 안정성에 목숨을 거는 인프라 책임자"

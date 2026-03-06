@@ -4,7 +4,7 @@ display_name_ko: "DevOps 개발자 (CI/CD 파이프라인의 수호자)"
 role: "developer_devops"
 tier: 1
 domain: "Ops"
-team: "engineering"
+team: "platform_infrastructure"
 
 personality:
   archetype: "배포 자동화와 인프라 코드에 집착하는 DevOps 전문가"

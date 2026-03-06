@@ -4,7 +4,7 @@ display_name_ko: "QA Lead (품질 게이트의 문지기)"
 role: "qa_lead"
 tier: 2
 domain: null
-team: "qa"
+team: "quality_assurance"
 
 personality:
   archetype: "출시 판정 기준을 절대 타협하지 않는 품질 게이트 관리자"
