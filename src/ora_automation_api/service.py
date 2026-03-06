@@ -14,7 +14,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import OrchestrationDecision, OrchestrationEvent, OrchestrationRun
+from .models import Organization, OrganizationAgent, OrchestrationDecision, OrchestrationEvent, OrchestrationRun
 from .queue import AgentRole, pick_agent_role
 from .schemas import DecisionCreate, OrchestrationRunCreate
 
@@ -412,6 +412,52 @@ def request_resume(db: Session, run_id: str) -> OrchestrationRun | None:
 
 
 # ---------------------------------------------------------------------------
+# Organization config loader
+# ---------------------------------------------------------------------------
+
+def _load_org_config(db: Session, org_id: str | None) -> dict | None:
+    """Load org config from DB for pipeline injection. Returns None if no org_id."""
+    if not org_id:
+        return None
+    org = db.get(Organization, org_id)
+    if not org:
+        logger.warning("org_id=%s not found in DB, falling back to default", org_id)
+        return None
+    agents = (
+        db.query(OrganizationAgent)
+        .filter(OrganizationAgent.org_id == org_id)
+        .order_by(OrganizationAgent.sort_order)
+        .all()
+    )
+    return {
+        "org_id": org.id,
+        "org_name": org.name,
+        "agents": [
+            {
+                "agent_id": a.agent_id,
+                "display_name": a.display_name,
+                "display_name_ko": a.display_name_ko,
+                "role": a.role,
+                "tier": a.tier,
+                "domain": a.domain,
+                "team": a.team,
+                "personality": a.personality,
+                "behavioral_directives": a.behavioral_directives,
+                "constraints": a.constraints,
+                "decision_focus": a.decision_focus,
+                "weights": a.weights,
+                "trust_map": a.trust_map,
+                "system_prompt_template": a.system_prompt_template,
+                "enabled": a.enabled,
+            }
+            for a in agents
+        ],
+        "flat_mode_agents": org.flat_mode_agents or [],
+        "agent_final_weights": org.agent_final_weights or {},
+    }
+
+
+# ---------------------------------------------------------------------------
 # Execute run (in-process pipeline)
 # ---------------------------------------------------------------------------
 
@@ -420,7 +466,6 @@ def execute_run(
     worker_id: str = "worker",
     timeout_seconds: float | None = None,
     db: Session | None = None,
-    org_config: dict | None = None,
 ) -> ExecutionOutcome:
     from .database import SessionLocal
 
@@ -482,6 +527,8 @@ def execute_run(
                 "worker_id": worker_id,
             },
         )
+
+        org_config = _load_org_config(db, run.org_id)
 
         outcome = _run_pipeline(
             db=db,
