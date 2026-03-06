@@ -54,10 +54,12 @@ app.add_middleware(
 )
 
 from .notion_router import router as notion_router
+from .org_router import router as org_router
 from .scheduler_router import router as scheduler_router
 
 app.include_router(chat_router)
 app.include_router(notion_router)
+app.include_router(org_router)
 app.include_router(scheduler_router)
 
 
@@ -95,6 +97,42 @@ def _run_ddl_migrations() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE(entity_type, entity_key)
         )""",
+        # Organizations
+        """CREATE TABLE IF NOT EXISTS organizations (
+            id VARCHAR(36) PRIMARY KEY,
+            name VARCHAR(128) NOT NULL UNIQUE,
+            description TEXT,
+            is_preset BOOLEAN NOT NULL DEFAULT FALSE,
+            teams JSONB NOT NULL DEFAULT '{}'::jsonb,
+            flat_mode_agents JSONB NOT NULL DEFAULT '[]'::jsonb,
+            agent_final_weights JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS organization_agents (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            agent_id VARCHAR(64) NOT NULL,
+            display_name VARCHAR(128) NOT NULL,
+            display_name_ko VARCHAR(128) NOT NULL DEFAULT '',
+            role VARCHAR(32) NOT NULL DEFAULT '',
+            tier INTEGER NOT NULL DEFAULT 1,
+            domain VARCHAR(64),
+            team VARCHAR(64) NOT NULL DEFAULT '',
+            personality JSONB NOT NULL DEFAULT '{}'::jsonb,
+            behavioral_directives JSONB NOT NULL DEFAULT '[]'::jsonb,
+            constraints JSONB NOT NULL DEFAULT '[]'::jsonb,
+            decision_focus JSONB NOT NULL DEFAULT '[]'::jsonb,
+            weights JSONB NOT NULL DEFAULT '{}'::jsonb,
+            trust_map JSONB NOT NULL DEFAULT '{}'::jsonb,
+            system_prompt_template TEXT,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(org_id, agent_id)
+        )""",
+        "ALTER TABLE orchestration_runs ADD COLUMN IF NOT EXISTS org_id VARCHAR(36)",
         # Scheduled jobs
         """CREATE TABLE IF NOT EXISTS scheduled_jobs (
             id VARCHAR(36) PRIMARY KEY,

@@ -309,6 +309,7 @@ def create_run(db: Session, payload: OrchestrationRunCreate) -> tuple[Orchestrat
         user_prompt=payload.user_prompt.strip(),
         target=target,
         agent_role=agent_role,
+        org_id=getattr(payload, "org_id", None),
         command=command,
         rollback_command=rollback_command,
         env=env,

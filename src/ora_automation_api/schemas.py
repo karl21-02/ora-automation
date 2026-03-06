@@ -64,6 +64,7 @@ class OrchestrationRunCreate(BaseModel):
     execution_command: str | None = Field(default=None, min_length=1, max_length=4096)
     rollback_command: str | None = Field(default=None, min_length=1, max_length=4096)
     decision: DecisionCreate | None = None
+    org_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
 class OrchestrationRunRead(BaseModel):
@@ -74,6 +75,7 @@ class OrchestrationRunRead(BaseModel):
     user_prompt: str
     target: str
     agent_role: str
+    org_id: str | None = None
     command: str
     rollback_command: str | None
     env: dict
@@ -307,3 +309,107 @@ class ScheduledJobRead(BaseModel):
     next_run_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+# ── Organizations ─────────────────────────────────────────────────
+
+
+class OrgAgentCreate(BaseModel):
+    agent_id: str = Field(..., min_length=1, max_length=64)
+    display_name: str = Field(..., min_length=1, max_length=128)
+    display_name_ko: str = Field(default="", max_length=128)
+    role: str = Field(default="", max_length=32)
+    tier: int = Field(default=1, ge=1, le=4)
+    domain: str | None = Field(default=None, max_length=64)
+    team: str = Field(default="", max_length=64)
+    personality: dict = Field(default_factory=dict)
+    behavioral_directives: list = Field(default_factory=list)
+    constraints: list = Field(default_factory=list)
+    decision_focus: list = Field(default_factory=list)
+    weights: dict = Field(default_factory=dict)
+    trust_map: dict = Field(default_factory=dict)
+    system_prompt_template: str | None = None
+    enabled: bool = True
+    sort_order: int = 0
+
+
+class OrgAgentUpdate(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=128)
+    display_name_ko: str | None = Field(default=None, max_length=128)
+    role: str | None = Field(default=None, max_length=32)
+    tier: int | None = Field(default=None, ge=1, le=4)
+    domain: str | None = None
+    team: str | None = Field(default=None, max_length=64)
+    personality: dict | None = None
+    behavioral_directives: list | None = None
+    constraints: list | None = None
+    decision_focus: list | None = None
+    weights: dict | None = None
+    trust_map: dict | None = None
+    system_prompt_template: str | None = None
+    enabled: bool | None = None
+    sort_order: int | None = None
+
+
+class OrgAgentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    org_id: str
+    agent_id: str
+    display_name: str
+    display_name_ko: str
+    role: str
+    tier: int
+    domain: str | None
+    team: str
+    personality: dict
+    behavioral_directives: list
+    constraints: list
+    decision_focus: list
+    weights: dict
+    trust_map: dict
+    system_prompt_template: str | None
+    enabled: bool
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class OrganizationCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = None
+    teams: dict = Field(default_factory=dict)
+    flat_mode_agents: list[str] = Field(default_factory=list)
+    agent_final_weights: dict[str, float] = Field(default_factory=dict)
+
+
+class OrganizationUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    description: str | None = None
+    teams: dict | None = None
+    flat_mode_agents: list[str] | None = None
+    agent_final_weights: dict[str, float] | None = None
+
+
+class OrganizationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    description: str | None
+    is_preset: bool
+    teams: dict
+    flat_mode_agents: list
+    agent_final_weights: dict
+    created_at: datetime
+    updated_at: datetime
+
+
+class OrganizationDetail(OrganizationRead):
+    agents: list[OrgAgentRead] = Field(default_factory=list)
+
+
+class OrganizationList(BaseModel):
+    items: list[OrganizationRead]
+    total: int

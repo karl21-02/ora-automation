@@ -16,6 +16,12 @@ class OrchestrationRun(Base):
     user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     target: Mapped[str] = mapped_column(String(64), nullable=False)
     agent_role: Mapped[str] = mapped_column(String(32), nullable=False, default="engineer")
+    org_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("organizations.id"),
+        nullable=True,
+        index=True,
+    )
     command: Mapped[str] = mapped_column(Text, nullable=False)
     rollback_command: Mapped[str | None] = mapped_column(Text, nullable=True)
     env: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
@@ -146,6 +152,61 @@ class NotionSyncState(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_preset: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    teams: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    flat_mode_agents: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    agent_final_weights: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class OrganizationAgent(Base):
+    __tablename__ = "organization_agents"
+    __table_args__ = (
+        UniqueConstraint("org_id", "agent_id", name="uq_org_agent"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    org_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    agent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    display_name_ko: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    tier: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    domain: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    team: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    personality: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    behavioral_directives: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    constraints: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    decision_focus: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    weights: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    trust_map: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    system_prompt_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
 
