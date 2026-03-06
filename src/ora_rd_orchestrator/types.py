@@ -260,3 +260,16 @@ class CheckpointResponse:
 # Callable type: receives CheckpointData, returns CheckpointResponse.
 # When None, the pipeline runs without pausing (default behavior).
 CheckpointCallback = Callable[[CheckpointData], CheckpointResponse] | None
+
+
+# ---------------------------------------------------------------------------
+# Pipeline cancellation + progress
+# ---------------------------------------------------------------------------
+
+class PipelineCancelled(Exception):
+    """Raised when a running pipeline detects its cancel_event is set."""
+    pass
+
+
+# (stage, message) → None
+ProgressCallback = Callable[[str, str], None] | None

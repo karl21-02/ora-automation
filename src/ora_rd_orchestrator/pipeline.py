@@ -14,6 +14,7 @@ import datetime as dt
 import json
 import logging
 import os
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -79,12 +80,37 @@ from .types import (
     CheckpointResponse,
     HierarchicalPipelineState,
     OrchestrationDecision,
+    PipelineCancelled,
+    ProgressCallback,
     TierResult,
     TopicState,
 )
 from .workspace import analyze_workspace, collect_workspace_summary
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Cancel / progress helpers
+# ---------------------------------------------------------------------------
+
+def _check_cancel(cancel_event: threading.Event | None) -> None:
+    """Raise PipelineCancelled if the event is set."""
+    if cancel_event is not None and cancel_event.is_set():
+        raise PipelineCancelled("Pipeline cancelled via cancel_event")
+
+
+def _notify_progress(
+    callback: ProgressCallback,
+    stage: str,
+    message: str,
+) -> None:
+    """Fire progress callback if provided."""
+    if callback is not None:
+        try:
+            callback(stage, message)
+        except Exception:
+            logger.debug("progress_callback error (stage=%s)", stage, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +284,7 @@ def generate_report(
     output_dir: Path,
     output_name: str,
     max_files: int,
-    extensions: List[str],
+    extensions: list[str],
     ignore_dirs: set[str],
     history_files: list[Path],
     report_focus: str = "",
@@ -282,6 +308,10 @@ def generate_report(
     llm_scoring_cmd: str | None = None,
     llm_scoring_timeout: float = 10.0,
     checkpoint: CheckpointCallback = None,
+    # --- in-process pipeline support ---
+    cancel_event: threading.Event | None = None,
+    progress_callback: ProgressCallback = None,
+    org_config: dict | None = None,
 ) -> dict:
     """Generate an R&D strategy report.
 
@@ -327,21 +357,33 @@ def generate_report(
     pipeline_decisions: list[OrchestrationDecision] = []
 
     # ------------------------------------------------------------------
-    # 1. Load personas
+    # 1. Load personas (org_config override or YAML default)
     # ------------------------------------------------------------------
-    resolved_persona_dir = persona_dir
-    if not resolved_persona_dir:
-        env_dir = os.getenv(PERSONA_DIR_ENV, "").strip()
-        resolved_persona_dir = Path(env_dir) if env_dir else default_persona_dir()
+    if org_config:
+        registry = PersonaRegistry.from_agent_dicts(org_config["agents"])
+        custom_flat_agents: set[str] = set(org_config.get("flat_mode_agents") or [])
+        custom_final_weights: dict[str, float] = org_config.get("agent_final_weights") or {}
+        resolved_persona_dir = None
+        logger.info("Loaded %d personas from org_config", len(registry))
     else:
-        resolved_persona_dir = Path(resolved_persona_dir)
+        resolved_persona_dir = persona_dir
+        if not resolved_persona_dir:
+            env_dir = os.getenv(PERSONA_DIR_ENV, "").strip()
+            resolved_persona_dir = Path(env_dir) if env_dir else default_persona_dir()
+        else:
+            resolved_persona_dir = Path(resolved_persona_dir)
 
-    registry = PersonaRegistry(resolved_persona_dir)
+        registry = PersonaRegistry(resolved_persona_dir)
+        custom_flat_agents = FLAT_MODE_AGENTS
+        custom_final_weights = AGENT_FINAL_WEIGHTS
+        logger.info("Loading personas from %s", resolved_persona_dir)
+
     personas = registry.load_all()
     agent_definitions = registry.to_agent_definitions() if personas else None
     topic_keywords: dict[str, list[str]] | None = None
 
-    logger.info("Loaded %d personas from %s", len(personas), resolved_persona_dir)
+    _notify_progress(progress_callback, "personas", f"Loaded {len(personas)} personas")
+    _check_cancel(cancel_event)
 
     # ------------------------------------------------------------------
     # 2. Workspace summary + Topic discovery
@@ -373,6 +415,8 @@ def generate_report(
     logger.info("Discovered %d topics (source: %s)",
                 len(discoveries),
                 discoveries[0].discovered_by if discoveries else "none")
+    _notify_progress(progress_callback, "topic_discovery", f"Discovered {len(discoveries)} topics")
+    _check_cancel(cancel_event)
 
     # ------------------------------------------------------------------
     # 2.5 Interactive checkpoint: let user review discovered topics
@@ -449,6 +493,8 @@ def generate_report(
         "status": "completed",
         "message": f"topic_count={len(states)}",
     })
+    _notify_progress(progress_callback, "workspace_analysis", f"Analyzed {len(states)} topics")
+    _check_cancel(cancel_event)
 
     # ------------------------------------------------------------------
     # HIERARCHICAL MODE
@@ -709,7 +755,7 @@ def generate_report(
         agent_definitions=agent_definitions,
         llm_command=resolved_scoring_cmd,
         llm_timeout=llm_scoring_timeout,
-        agent_filter=FLAT_MODE_AGENTS,
+        agent_filter=custom_flat_agents,
     )
     # Convert {agent_id: {topic_id: {feature: val}}} → {topic_id: {score_agent: val}}
     scores: dict[str, dict[str, float]] = {}
@@ -723,6 +769,8 @@ def generate_report(
                 per_topic[_agent_score_key(agent_id)] = compute_agent_score(features, weights)
         scores[topic_id] = per_topic
     logger.info("LLM scoring completed for %d agents", len(all_agent_scores))
+    _notify_progress(progress_callback, "scoring", f"Scored {len(all_agent_scores)} agents")
+    _check_cancel(cancel_event)
 
     discussion: list[dict] = []
     last_llm_state: dict[str, Any] | None = None
@@ -743,6 +791,8 @@ def generate_report(
             "message": f"rounds={effective_rounds} profile={profile}",
         })
         for round_no in range(1, effective_rounds + 1):
+            _check_cancel(cancel_event)
+            _notify_progress(progress_callback, "deliberation", f"Round {round_no}/{effective_rounds}")
             ranked_snapshot = build_final_score(states, scores)
 
             score_updates, decisions, round_summaries, llm_actions, llm_state = llm_deliberation_round(
@@ -807,6 +857,9 @@ def generate_report(
     else:
         discussion = []
 
+    _notify_progress(progress_callback, "deliberation", "Deliberation completed")
+    _check_cancel(cancel_event)
+
     # 6. Finalize scores
     ranked = build_final_score(states, scores)
     selected = ranked[:top_k]
@@ -849,7 +902,7 @@ def generate_report(
     synergy = build_synergy_graph(states, selected)
 
     agent_rankings = build_agent_rankings(
-        scores, top_k=top_k, agent_filter=FLAT_MODE_AGENTS,
+        scores, top_k=top_k, agent_filter=custom_flat_agents,
     )
 
     if not pipeline_decisions:
@@ -953,6 +1006,8 @@ def generate_report(
         "status": "consensus_completed",
         "message": f"consensus_method={consensus_summary.get('method', 'llm-only')}",
     })
+    _notify_progress(progress_callback, "consensus", "Consensus completed")
+    _check_cancel(cancel_event)
 
     if ORCHESTRATION_STAGE_EXECUTION in stages:
         stage_log.append({
@@ -1121,6 +1176,9 @@ def generate_report(
         })
 
     # 9. Generate reports
+    _notify_progress(progress_callback, "report_generation", "Generating final report")
+    _check_cancel(cancel_event)
+
     markdown = as_markdown(
         workspace=workspace,
         top_topics=selected,
