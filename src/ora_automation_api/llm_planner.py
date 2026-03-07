@@ -1,21 +1,22 @@
 from __future__ import annotations
 
 import json
-import shlex
-import subprocess
+import logging
 from typing import Any
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class PlannerError(RuntimeError):
     pass
 
 
-def _parse_json_from_stdout(stdout: str) -> dict[str, Any]:
-    raw = stdout.strip()
+def _parse_json_response(text: str) -> dict[str, Any]:
+    raw = text.strip()
     if not raw:
-        raise PlannerError("planner returned empty stdout")
+        raise PlannerError("planner returned empty response")
     try:
         parsed = json.loads(raw)
         if isinstance(parsed, dict):
@@ -33,7 +34,7 @@ def _parse_json_from_stdout(stdout: str) -> dict[str, Any]:
                 return parsed
         except json.JSONDecodeError:
             continue
-    raise PlannerError("planner stdout is not valid JSON object")
+    raise PlannerError("planner response is not valid JSON object")
 
 
 def _normalize_env(raw: Any) -> dict[str, str]:
@@ -131,50 +132,66 @@ def _normalize_plan(raw: dict[str, Any], prompt: str) -> dict[str, Any]:
     return plan
 
 
+def _get_gemini_provider():
+    """Get a GeminiProvider instance, raising PlannerError if unavailable."""
+    from ora_rd_orchestrator.gemini_provider import GeminiProvider
+
+    provider = GeminiProvider()
+    if not provider.is_available():
+        raise PlannerError(
+            "Gemini provider is not available. "
+            "Check GOOGLE_APPLICATION_CREDENTIALS and GOOGLE_CLOUD_PROJECT_ID."
+        )
+    return provider
+
+
 def run_llm_planner(
     prompt: str,
     context: dict[str, Any] | None = None,
     timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
-    cmd = settings.llm_planner_cmd.strip()
-    if not cmd:
-        raise PlannerError("ORA_AUTOMATION_LLM_PLANNER_CMD is not configured")
+    provider = _get_gemini_provider()
 
-    payload = {
-        "prompt": prompt,
-        "context": context or {},
-        "allowed_targets": list(settings.allowed_targets),
-        "allowed_agent_roles": list(settings.agent_roles),
-        "required_output_fields": [
-            "target",
-            "agent_role",
-            "env",
-            "max_attempts",
-            "pipeline_stages",
-            "execution_command",
-            "rollback_command",
-            "decision",
-        ],
-    }
-    timeout = float(timeout_seconds or settings.llm_planner_timeout_seconds)
-    proc = subprocess.run(
-        shlex.split(cmd),
-        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        cwd=str(settings.automation_root),
-        timeout=max(1.0, timeout),
-        check=False,
+    system_prompt = (
+        "You are an orchestration planner. Given a user prompt, produce a JSON object "
+        "that describes how to execute the requested task.\n\n"
+        f"Allowed targets: {json.dumps(list(settings.allowed_targets))}\n"
+        f"Allowed agent roles: {json.dumps(list(settings.agent_roles))}\n\n"
+        "Required output fields (JSON object):\n"
+        "- target: one of the allowed targets\n"
+        "- agent_role: one of the allowed agent roles (or empty string)\n"
+        "- env: dict of environment variable overrides\n"
+        "- max_attempts: integer 1-20 or null\n"
+        "- pipeline_stages: list of stages (analysis, deliberation, execution)\n"
+        "- execution_command: shell command string or null\n"
+        "- rollback_command: shell command string or null\n"
+        "- decision: object with owner, rationale, risk, next_action, payload (or null)\n\n"
+        "Respond with ONLY a valid JSON object, no markdown fences or extra text."
     )
-    if proc.returncode != 0:
-        stderr = (proc.stderr or b"").decode("utf-8", errors="ignore").strip()
-        raise PlannerError(f"planner command failed (exit={proc.returncode}): {stderr[:800]}")
 
-    stdout = (proc.stdout or b"").decode("utf-8", errors="ignore")
-    raw = _parse_json_from_stdout(stdout)
+    user_content = json.dumps(
+        {"prompt": prompt, "context": context or {}},
+        ensure_ascii=False,
+    )
+
+    timeout = float(timeout_seconds or settings.llm_planner_timeout_seconds)
+
+    try:
+        raw_text = provider.call(
+            system_prompt=system_prompt,
+            user_content=user_content,
+            tier="flash",
+            timeout=max(10.0, timeout),
+        )
+    except Exception as exc:
+        raise PlannerError(f"Gemini provider call failed: {exc}") from exc
+
+    if not raw_text:
+        raise PlannerError("planner returned empty response")
+
+    raw = _parse_json_response(raw_text)
     plan = _normalize_plan(raw, prompt=prompt)
     if not plan.get("planner_metadata"):
         plan["planner_metadata"] = {}
-    plan["planner_metadata"]["planner_command"] = cmd
+    plan["planner_metadata"]["planner_provider"] = "gemini"
     return plan
-

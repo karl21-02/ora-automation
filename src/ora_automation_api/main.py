@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -270,7 +271,10 @@ def health(db: Session = Depends(get_db)) -> dict:
         "status": "ok",
         "database": "ok",
         "queue": "rabbitmq",
-        "llm_planner_configured": bool(settings.llm_planner_cmd.strip()),
+        "llm_planner_configured": bool(
+            os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+            and os.getenv("GOOGLE_CLOUD_PROJECT_ID", "").strip()
+        ),
         "automation_root": str(settings.automation_root),
         "allowed_targets": list(settings.allowed_targets),
         "agent_roles": list(settings.agent_roles),

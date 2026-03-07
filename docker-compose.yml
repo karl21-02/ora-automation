@@ -42,7 +42,6 @@ services:
       RABBITMQ_RETRY_EXCHANGE: ora.automation.retry
       RABBITMQ_DLX_EXCHANGE: ora.automation.dlx
       RABBITMQ_QUEUE_PREFIX: ora.automation.agent
-      ORA_AUTOMATION_LLM_PLANNER_CMD: ${ORA_AUTOMATION_LLM_PLANNER_CMD:-}
       ORA_AUTOMATION_LLM_PLANNER_TIMEOUT_SECONDS: ${ORA_AUTOMATION_LLM_PLANNER_TIMEOUT_SECONDS:-30}
       ORA_AUTOMATION_ROOT: /workspace/Ora/ora-automation
       ORA_AUTOMATION_RUN_OUTPUT: /workspace/Ora/ora-automation/research_reports/api_runs
