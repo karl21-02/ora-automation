@@ -168,12 +168,22 @@ class ChatChoice(BaseModel):
     value: str
 
 
+class OrgRecommendOption(BaseModel):
+    org_id: str
+    org_name: str
+    description: str = ""
+    score: float = 0.0
+    reason: str = ""
+    is_recommended: bool = False
+
+
 class ChatResponse(BaseModel):
     reply: str
     plan: ChatPlan | None = None
     plans: list[ChatPlan] | None = None
     choices: list[ChatChoice] | None = None
     project_select: list[ProjectInfo] | None = None
+    org_recommend: list[OrgRecommendOption] | None = None
     run_id: str | None = None
     dialog_state: str | None = None
     confirmation_required: bool = False

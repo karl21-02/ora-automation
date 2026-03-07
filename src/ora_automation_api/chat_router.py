@@ -35,13 +35,15 @@ from .dialog_engine import (
     DialogContext,
     DialogState,
     IntentType,
+    OrgRecommendationResult,
     coerce_proposed_plans,
     merge_slots,
+    recommend_org,
     run_stage1,
     run_stage2_stream,
     run_stage2_sync,
 )
-from .models import ChatConversation, ChatMessageRow, Organization, OrganizationChapter
+from .models import ChatConversation, ChatMessageRow, Organization, OrganizationChapter, OrganizationSilo
 from .scheduling_handler import ScheduleValidationError, create_scheduled_job_from_slots
 from .schemas import (
     ChatChoice,
@@ -54,6 +56,7 @@ from .schemas import (
     ConversationList,
     ConversationRead,
     ConversationUpdate,
+    OrgRecommendOption,
     ProjectInfo,
     ReportListItem,
 )
@@ -611,6 +614,111 @@ def _build_org_context_for_dialog(db: Session, org_id: str | None) -> str:
     return "\n".join(lines)
 
 
+_ACTIONABLE_INTENTS = frozenset({IntentType.RESEARCH, IntentType.TESTING, IntentType.SCHEDULING})
+
+
+def _build_org_summaries_for_recommend(db: Session) -> list[dict]:
+    """Build LLM-consumable org summary dicts for recommendation."""
+    orgs = db.query(Organization).order_by(Organization.name).all()
+    summaries: list[dict] = []
+    for org in orgs:
+        summary: dict[str, Any] = {
+            "org_id": org.id,
+            "org_name": org.name,
+            "description": org.description or "",
+        }
+        chapters = (
+            db.query(OrganizationChapter)
+            .filter(OrganizationChapter.org_id == org.id)
+            .order_by(OrganizationChapter.sort_order)
+            .all()
+        )
+        if chapters:
+            summary["chapters"] = [
+                {"name": ch.name, "description": ch.description or ""}
+                for ch in chapters
+            ]
+        silos = (
+            db.query(OrganizationSilo)
+            .filter(OrganizationSilo.org_id == org.id)
+            .order_by(OrganizationSilo.sort_order)
+            .all()
+        )
+        if silos:
+            summary["silos"] = [
+                {"name": s.name, "description": s.description or ""}
+                for s in silos
+            ]
+        summaries.append(summary)
+    return summaries
+
+
+def _maybe_recommend_org(
+    db: Session,
+    conv: ChatConversation,
+    user_message: str,
+    classification: "IntentClassification",
+    dialog_ctx: DialogContext,
+) -> list[OrgRecommendOption] | None:
+    """Check if org recommendation is needed and return options if so.
+
+    Returns None when recommendation should be skipped.
+    """
+    # Skip: already has org_id
+    if conv.org_id:
+        return None
+
+    # Skip: already recommended this conversation
+    if dialog_ctx.accumulated_slots.get("org_recommend_done"):
+        return None
+
+    # Skip: non-actionable intent
+    if classification.intent not in _ACTIONABLE_INTENTS:
+        return None
+
+    org_summaries = _build_org_summaries_for_recommend(db)
+
+    # Skip: no orgs exist
+    if not org_summaries:
+        return None
+
+    # Auto-apply: only 1 org → just bind it
+    if len(org_summaries) == 1:
+        conv.org_id = org_summaries[0]["org_id"]
+        return None
+
+    # 2+ orgs: ask Gemini
+    intent_summary = f"{classification.intent.value} (confidence: {classification.confidence:.2f})"
+    result = recommend_org(user_message, intent_summary, org_summaries)
+
+    options: list[OrgRecommendOption] = []
+    recommended_id = result.recommended_org_id
+
+    # Build from rankings if available, otherwise from org_summaries
+    if result.rankings:
+        for r in result.rankings:
+            options.append(OrgRecommendOption(
+                org_id=r.get("org_id", ""),
+                org_name=r.get("org_name", ""),
+                description="",
+                score=float(r.get("score", 0.0)),
+                reason=r.get("reason", ""),
+                is_recommended=(r.get("org_id") == recommended_id),
+            ))
+    else:
+        for s in org_summaries:
+            options.append(OrgRecommendOption(
+                org_id=s["org_id"],
+                org_name=s["org_name"],
+                description=s.get("description", ""),
+                score=0.0,
+                reason="",
+                is_recommended=(s["org_id"] == recommended_id),
+            ))
+
+    return options if options else None
+
+
 def _resolve_org_name(db: Session, org_id: str | None) -> str | None:
     if not org_id:
         return None
@@ -712,6 +820,27 @@ def _chat_upce(req: ChatRequest, db: Session) -> ChatResponse:
     if not conv.title and req.message:
         conv.title = req.message[:100]
 
+    # ── Org selection message detection ──
+    if req.message.startswith("ora:org_select:"):
+        selected_org_id = req.message[len("ora:org_select:"):].strip()
+        dialog_ctx, ctx_version = _get_dialog_context(conv)
+        if selected_org_id:
+            conv.org_id = selected_org_id
+            org_name = _resolve_org_name(db, selected_org_id) or selected_org_id
+            reply = f"**{org_name}** 조직이 선택되었습니다. 이어서 진행할게요."
+        else:
+            reply = "미분류로 진행합니다."
+        dialog_ctx.accumulated_slots["org_recommend_done"] = True
+        _persist_message(db, conv.id, "user", req.message)
+        _persist_message(db, conv.id, "assistant", reply)
+        try:
+            _save_dialog_context(db, conv, dialog_ctx, ctx_version)
+        except StaleDialogError:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Dialog context was modified concurrently. Please retry.")
+        db.commit()
+        return ChatResponse(reply=reply, dialog_state=dialog_ctx.state.value)
+
     dialog_ctx, ctx_version = _get_dialog_context(conv)
     projects = _scan_projects()
     history = [{"role": m.role, "content": m.content} for m in req.history]
@@ -720,6 +849,27 @@ def _chat_upce(req: ChatRequest, db: Session) -> ChatResponse:
     # Stage 1: Understanding
     classification = run_stage1(req.message, history, dialog_ctx, projects, org_context=org_context)
     dialog_ctx = merge_slots(dialog_ctx, classification)
+
+    # ── Org recommendation intercept (before short circuits) ──
+    org_options = _maybe_recommend_org(db, conv, req.message, classification, dialog_ctx)
+    if org_options is not None:
+        recommended = next((o for o in org_options if o.is_recommended), None)
+        reason = recommended.reason if recommended else ""
+        reply = f"이 작업에 적합한 조직을 추천드릴게요.\n{reason}" if reason else "이 작업에 적합한 조직을 추천드릴게요."
+        _persist_message(db, conv.id, "user", req.message)
+        _persist_message(db, conv.id, "assistant", reply)
+        try:
+            _save_dialog_context(db, conv, dialog_ctx, ctx_version)
+        except StaleDialogError:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Dialog context was modified concurrently. Please retry.")
+        db.commit()
+        return ChatResponse(
+            reply=reply,
+            org_recommend=org_options,
+            dialog_state=classification.next_state.value,
+            intent_summary=f"{classification.intent.value} (confidence: {classification.confidence:.2f})",
+        )
 
     # Short circuit: confirmation → no Stage 2 text needed
     if classification.is_confirmation and dialog_ctx.proposed_plans:
@@ -851,6 +1001,42 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
     if not conv.title and req.message:
         conv.title = req.message[:100]
 
+    # ── Org selection message detection (streaming path) ──
+    if req.message.startswith("ora:org_select:"):
+        selected_org_id = req.message[len("ora:org_select:"):].strip()
+        dialog_ctx, ctx_version = _get_dialog_context(conv)
+        if selected_org_id:
+            conv.org_id = selected_org_id
+            org_name = _resolve_org_name(db, selected_org_id) or selected_org_id
+            reply = f"**{org_name}** 조직이 선택되었습니다. 이어서 진행할게요."
+        else:
+            reply = "미분류로 진행합니다."
+        dialog_ctx.accumulated_slots["org_recommend_done"] = True
+        _persist_message(db, conv.id, "user", req.message)
+        _persist_message(db, conv.id, "assistant", reply)
+        try:
+            _save_dialog_context(db, conv, dialog_ctx, ctx_version)
+        except StaleDialogError:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Dialog context was modified concurrently. Please retry.")
+        db.commit()
+
+        def org_select_gen() -> Generator[str, None, None]:
+            token_data = json.dumps({"type": "token", "content": reply}, ensure_ascii=False)
+            yield f"data: {token_data}\n\n"
+            done_payload = {
+                "type": "done",
+                "full_reply": reply,
+                "dialog_state": dialog_ctx.state.value,
+            }
+            yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            org_select_gen(), media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     dialog_ctx, ctx_version = _get_dialog_context(conv)
     projects = _scan_projects()
     history = [{"role": m.role, "content": m.content} for m in req.history]
@@ -875,6 +1061,41 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     updated_ctx = merge_slots(dialog_ctx, classification)
+
+    # ── Org recommendation intercept (streaming path) ──
+    org_options = _maybe_recommend_org(db, conv, req.message, classification, updated_ctx)
+    if org_options is not None:
+        recommended = next((o for o in org_options if o.is_recommended), None)
+        reason = recommended.reason if recommended else ""
+        rec_reply = f"이 작업에 적합한 조직을 추천드릴게요.\n{reason}" if reason else "이 작업에 적합한 조직을 추천드릴게요."
+        try:
+            _save_dialog_context(db, conv, updated_ctx, ctx_version)
+        except StaleDialogError:
+            pass
+        db.commit()
+
+        def org_rec_gen() -> Generator[str, None, None]:
+            token_data = json.dumps({"type": "token", "content": rec_reply}, ensure_ascii=False)
+            yield f"data: {token_data}\n\n"
+            done_payload: dict[str, Any] = {
+                "type": "done",
+                "full_reply": rec_reply,
+                "dialog_state": classification.next_state.value,
+                "intent_summary": f"{classification.intent.value} (confidence: {classification.confidence:.2f})",
+                "org_recommend": [o.model_dump() for o in org_options],
+            }
+            yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            try:
+                with _session_scope() as pdb:
+                    _persist_message(pdb, conv_id, "assistant", rec_reply)
+            except Exception:
+                logger.exception("Failed to persist org recommendation message")
+
+        return StreamingResponse(
+            org_rec_gen(), media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     def generate() -> Generator[str, None, None]:
         # Short circuit: confirmation

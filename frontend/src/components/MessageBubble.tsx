@@ -12,6 +12,7 @@ interface Props {
   onProjectConfirm?: (selected: string[]) => void
   onConfirmDialog?: () => void
   onRejectDialog?: () => void
+  onOrgRecommendSelect?: (orgId: string | null) => void
   executing?: boolean
 }
 
@@ -27,7 +28,7 @@ const ALLOWED_TARGETS = [
   'run-single', 'e2e-service', 'e2e-service-all', 'verify-sources',
 ]
 
-export default function MessageBubble({ message, onExecute, onExecuteBatch, onDismissPlan, onChoiceClick, onProjectConfirm, onConfirmDialog, onRejectDialog, executing }: Props) {
+export default function MessageBubble({ message, onExecute, onExecuteBatch, onDismissPlan, onChoiceClick, onProjectConfirm, onConfirmDialog, onRejectDialog, onOrgRecommendSelect, executing }: Props) {
   const isUser = message.role === 'user'
   const [editing, setEditing] = useState(false)
   const [editTarget, setEditTarget] = useState(message.plan?.target || '')
@@ -598,6 +599,81 @@ export default function MessageBubble({ message, onExecute, onExecuteBatch, onDi
             onDismiss={onProjectConfirm ? () => onProjectConfirm([]) : () => {}}
             disabled={!onProjectConfirm}
           />
+        )}
+
+        {/* ── Org recommend card ── */}
+        {message.orgRecommend && message.orgRecommend.length > 0 && (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {message.orgRecommend.map((opt) => (
+              <button
+                key={opt.org_id}
+                onClick={() => onOrgRecommendSelect?.(opt.org_id)}
+                disabled={!onOrgRecommendSelect}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  border: opt.is_recommended ? '2px solid #3b82f6' : '1px solid #d1d5db',
+                  backgroundColor: !onOrgRecommendSelect ? '#f9fafb' : opt.is_recommended ? '#eff6ff' : '#fff',
+                  cursor: !onOrgRecommendSelect ? 'default' : 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.15s',
+                  width: '100%',
+                }}
+                onMouseEnter={(e) => {
+                  if (onOrgRecommendSelect) {
+                    e.currentTarget.style.borderColor = '#3b82f6'
+                    e.currentTarget.style.backgroundColor = '#eff6ff'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (onOrgRecommendSelect) {
+                    e.currentTarget.style.borderColor = opt.is_recommended ? '#3b82f6' : '#d1d5db'
+                    e.currentTarget.style.backgroundColor = opt.is_recommended ? '#eff6ff' : '#fff'
+                  }
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: '#1f2937' }}>
+                    {opt.is_recommended && <span style={{ color: '#3b82f6', marginRight: 4 }}>{'★'}</span>}
+                    {opt.org_name}
+                  </div>
+                  {opt.reason && (
+                    <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{opt.reason}</div>
+                  )}
+                </div>
+                {opt.score > 0 && (
+                  <span style={{
+                    fontSize: 11,
+                    color: '#9ca3af',
+                    fontWeight: 500,
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {(opt.score * 100).toFixed(0)}%
+                  </span>
+                )}
+              </button>
+            ))}
+            {onOrgRecommendSelect && (
+              <button
+                onClick={() => onOrgRecommendSelect(null)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #e5e7eb',
+                  backgroundColor: '#fff',
+                  color: '#9ca3af',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  textAlign: 'center',
+                }}
+              >
+                미분류로 계속
+              </button>
+            )}
+          </div>
         )}
 
         {message.runId && (

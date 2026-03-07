@@ -23,6 +23,63 @@ from .schemas import ChatPlan, ProjectInfo
 logger = logging.getLogger(__name__)
 
 
+# ── Org Recommendation ───────────────────────────────────────────────
+
+
+class OrgRecommendationResult(BaseModel):
+    recommended_org_id: str | None = None
+    reason: str = ""
+    rankings: list[dict] = Field(default_factory=list)
+
+
+_ORG_RECOMMEND_PROMPT = """\
+You are an organization matching engine for the Ora R&D platform.
+Given a user's message and available organizations, recommend the best-fit organization.
+
+## User message
+{user_message}
+
+## Intent
+{intent_summary}
+
+## Available organizations
+{org_summaries}
+
+Return JSON:
+{{
+  "recommended_org_id": "<best org_id>",
+  "reason": "<1-2 sentence in Korean>",
+  "rankings": [
+    {{"org_id": "...", "org_name": "...", "score": 0.0, "reason": "..."}}
+  ]
+}}
+Rules: rank ALL orgs by fit. Korean reasons. If no clear winner, recommend the first org as default.
+"""
+
+
+def recommend_org(
+    user_message: str,
+    intent_summary: str,
+    org_summaries: list[dict],
+) -> OrgRecommendationResult:
+    """Call Gemini to recommend the best-fit organization."""
+    if not org_summaries:
+        return OrgRecommendationResult()
+
+    summaries_str = json.dumps(org_summaries, ensure_ascii=False, indent=2)
+    prompt = _ORG_RECOMMEND_PROMPT.format(
+        user_message=user_message,
+        intent_summary=intent_summary,
+        org_summaries=summaries_str,
+    )
+    try:
+        raw = _call_gemini_json(prompt, [{"role": "user", "parts": [{"text": "추천해주세요."}]}])
+        return OrgRecommendationResult.model_validate(raw)
+    except Exception as exc:
+        logger.warning("recommend_org failed: %s", exc)
+        return OrgRecommendationResult()
+
+
 # ── Enums ─────────────────────────────────────────────────────────────
 
 

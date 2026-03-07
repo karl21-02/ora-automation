@@ -146,6 +146,9 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
           if (event.project_select && event.project_select.length > 0) {
             updates.projectSelect = event.project_select
           }
+          if (event.org_recommend && event.org_recommend.length > 0) {
+            updates.orgRecommend = event.org_recommend
+          }
           if (event.dialog_state) {
             updates.dialogState = event.dialog_state as DialogState
           }
@@ -262,6 +265,13 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
     handleSend(text)
   }, [handleSend, onNewMessage])
 
+  const handleOrgRecommendSelect = useCallback((orgId: string | null) => {
+    if (orgId) {
+      onChangeOrg(orgId)
+    }
+    handleSend(`ora:org_select:${orgId ?? ''}`)
+  }, [handleSend, onChangeOrg])
+
   const handleDismissPlan = useCallback((msgId: string) => {
     onUpdateMessage(msgId, { plan: null, plans: null })
     onNewMessage({
@@ -357,6 +367,7 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
               onDismissPlan={(msg.plan || (msg.plans && msg.plans.length > 0)) ? () => handleDismissPlan(msg.id) : undefined}
               onChoiceClick={isLastAssistant && msg.choices && msg.choices.length > 0 ? handleChoiceClick : undefined}
               onProjectConfirm={isLastAssistant && msg.projectSelect && msg.projectSelect.length > 0 ? handleProjectConfirm : undefined}
+              onOrgRecommendSelect={isLastAssistant && msg.orgRecommend && msg.orgRecommend.length > 0 ? handleOrgRecommendSelect : undefined}
               onConfirmDialog={isLastAssistant && msg.confirmationRequired ? () => handleSend('확인') : undefined}
               onRejectDialog={isLastAssistant && msg.confirmationRequired ? () => handleSend('취소') : undefined}
               executing={executingPlanId != null && (executingPlanId === msg.plan?.target || executingPlanId === 'batch')}

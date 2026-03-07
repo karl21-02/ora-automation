@@ -1,4 +1,4 @@
-import type { ChatChoice, ChatPlan, ChatResponse, OrgAgent, OrgChapter, OrgSilo, OrchestrationEvent, OrchestrationRun, Organization, OrganizationDetail, ProjectInfo, ReportListItem, ScheduledJob, ScheduledJobCreate } from '../types'
+import type { ChatChoice, ChatPlan, ChatResponse, OrgAgent, OrgChapter, OrgRecommendOption, OrgSilo, OrchestrationEvent, OrchestrationRun, Organization, OrganizationDetail, ProjectInfo, ReportListItem, ScheduledJob, ScheduledJobCreate } from '../types'
 
 const BASE = '/api/v1'
 
@@ -36,6 +36,7 @@ export interface StreamEvent {
   plans?: { target: string; env: Record<string, string>; label?: string }[] | null
   choices?: ChatChoice[] | null
   project_select?: ProjectInfo[] | null
+  org_recommend?: OrgRecommendOption[] | null
   dialog_state?: string | null
   confirmation_required?: boolean
   intent_summary?: string | null

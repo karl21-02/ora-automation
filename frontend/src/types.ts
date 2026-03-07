@@ -18,6 +18,15 @@ export interface ProjectInfo {
   description: string
 }
 
+export interface OrgRecommendOption {
+  org_id: string
+  org_name: string
+  description: string
+  score: number
+  reason: string
+  is_recommended: boolean
+}
+
 export type DialogState = 'idle' | 'understanding' | 'slot_filling' | 'confirming' | 'executing' | 'reporting'
 
 export interface ChatResponse {
@@ -78,6 +87,7 @@ export interface Message {
   plans?: ChatPlan[] | null
   choices?: ChatChoice[] | null
   projectSelect?: ProjectInfo[] | null
+  orgRecommend?: OrgRecommendOption[] | null
   runId?: string | null
   dialogState?: DialogState | null
   confirmationRequired?: boolean | null
