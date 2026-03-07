@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { cloneOrg, createOrg, deleteOrg, getOrg, listOrgs } from '../lib/api'
 import type { Organization, OrganizationDetail } from '../types'
 import AgentEditor from './AgentEditor'
+import ChapterEditor from './ChapterEditor'
 import OrgChart from './OrgChart'
+import OrgDesigner from './OrgDesigner'
 import OrgEditor from './OrgEditor'
 
 export default function OrgPanel() {
@@ -14,7 +16,8 @@ export default function OrgPanel() {
   const [cloneName, setCloneName] = useState('')
   const [cloningId, setCloningId] = useState<string | null>(null)
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
-  const [view, setView] = useState<'list' | 'chart'>('list')
+  const [editingChapterId, setEditingChapterId] = useState<string | null>(null)
+  const [view, setView] = useState<'designer' | 'list' | 'chart'>('designer')
   const [error, setError] = useState('')
 
   const refresh = useCallback(async () => {
@@ -73,14 +76,43 @@ export default function OrgPanel() {
       const detail = await getOrg(orgId)
       setSelectedOrg(detail)
       setEditingAgentId(null)
+      setEditingChapterId(null)
     } catch {
       setError('Failed to load organization details')
     }
   }
 
   const editingAgent = selectedOrg?.agents.find(a => a.id === editingAgentId) ?? null
+  const editingChapter = selectedOrg?.chapters?.find(c => c.id === editingChapterId) ?? null
+
+  const refreshOrg = async () => {
+    if (!selectedOrg) return
+    const updated = await getOrg(selectedOrg.id)
+    setSelectedOrg(updated)
+  }
 
   if (loading) return <div style={{ padding: 24, color: '#9ca3af' }}>Loading...</div>
+
+  // Chapter editor view
+  if (selectedOrg && editingChapter) {
+    const chapterAgents = selectedOrg.agents.filter(a => a.chapter_id === editingChapter.id)
+    return (
+      <ChapterEditor
+        org={selectedOrg}
+        chapter={editingChapter}
+        agents={chapterAgents}
+        onBack={() => setEditingChapterId(null)}
+        onSaved={async () => {
+          await refreshOrg()
+          setEditingChapterId(null)
+        }}
+        onSelectAgent={(agentId) => {
+          setEditingChapterId(null)
+          setEditingAgentId(agentId)
+        }}
+      />
+    )
+  }
 
   // Agent editor view
   if (selectedOrg && editingAgent) {
@@ -90,8 +122,7 @@ export default function OrgPanel() {
         agent={editingAgent}
         onBack={() => setEditingAgentId(null)}
         onSaved={async () => {
-          const updated = await getOrg(selectedOrg.id)
-          setSelectedOrg(updated)
+          await refreshOrg()
           setEditingAgentId(null)
         }}
       />
@@ -107,23 +138,38 @@ export default function OrgPanel() {
           <span style={{ fontWeight: 600, fontSize: 15 }}>{selectedOrg.name}</span>
           {selectedOrg.is_preset && <span style={presetBadge}>Preset</span>}
           <div style={{ flex: 1 }} />
-          <button
-            onClick={() => setView(view === 'list' ? 'chart' : 'list')}
-            style={tabBtnStyle}
-          >
-            {view === 'list' ? 'Org Chart' : 'Agent List'}
-          </button>
+          <div style={{ display: 'flex', borderRadius: 6, border: '1px solid #d1d5db', overflow: 'hidden' }}>
+            {(['designer', 'list', 'chart'] as const).map(v => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                style={{
+                  ...tabBtnStyle,
+                  border: 'none',
+                  borderRadius: 0,
+                  backgroundColor: view === v ? '#2563eb' : '#fff',
+                  color: view === v ? '#fff' : '#374151',
+                }}
+              >
+                {v === 'designer' ? 'Designer' : v === 'list' ? 'Agent List' : 'Org Chart'}
+              </button>
+            ))}
+          </div>
         </div>
-        {view === 'chart' ? (
+        {view === 'designer' ? (
+          <OrgDesigner
+            org={selectedOrg}
+            onSelectAgent={setEditingAgentId}
+            onSelectChapter={setEditingChapterId}
+            onRefresh={refreshOrg}
+          />
+        ) : view === 'chart' ? (
           <OrgChart org={selectedOrg} onSelectAgent={setEditingAgentId} />
         ) : (
           <OrgEditor
             org={selectedOrg}
             onSelectAgent={setEditingAgentId}
-            onRefresh={async () => {
-              const updated = await getOrg(selectedOrg.id)
-              setSelectedOrg(updated)
-            }}
+            onRefresh={refreshOrg}
           />
         )}
       </div>

@@ -129,6 +129,10 @@ export interface OrgAgent {
   id: string
   org_id: string
   agent_id: string
+  silo_id: string | null
+  chapter_id: string | null
+  is_clevel: boolean
+  weight_score: number
   display_name: string
   display_name_ko: string
   role: string
@@ -148,6 +152,33 @@ export interface OrgAgent {
   updated_at: string
 }
 
+export interface OrgSilo {
+  id: string
+  org_id: string
+  name: string
+  description: string | null
+  color: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface OrgChapter {
+  id: string
+  org_id: string
+  name: string
+  description: string | null
+  shared_directives: string[]
+  shared_constraints: string[]
+  shared_decision_focus: string[]
+  chapter_prompt: string
+  color: string
+  icon: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
 export interface Organization {
   id: string
   name: string
@@ -156,10 +187,13 @@ export interface Organization {
   teams: Record<string, string[]>
   flat_mode_agents: string[]
   agent_final_weights: Record<string, number>
+  pipeline_params: Record<string, unknown>
   created_at: string
   updated_at: string
 }
 
 export interface OrganizationDetail extends Organization {
   agents: OrgAgent[]
+  silos: OrgSilo[]
+  chapters: OrgChapter[]
 }

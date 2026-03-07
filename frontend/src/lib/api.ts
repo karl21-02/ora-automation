@@ -1,4 +1,4 @@
-import type { ChatChoice, ChatPlan, ChatResponse, OrgAgent, OrchestrationEvent, OrchestrationRun, Organization, OrganizationDetail, ProjectInfo, ReportListItem, ScheduledJob, ScheduledJobCreate } from '../types'
+import type { ChatChoice, ChatPlan, ChatResponse, OrgAgent, OrgChapter, OrgSilo, OrchestrationEvent, OrchestrationRun, Organization, OrganizationDetail, ProjectInfo, ReportListItem, ScheduledJob, ScheduledJobCreate } from '../types'
 
 const BASE = '/api/v1'
 
@@ -233,6 +233,7 @@ export async function createOrg(data: {
   teams?: Record<string, string[]>
   flat_mode_agents?: string[]
   agent_final_weights?: Record<string, number>
+  pipeline_params?: Record<string, unknown>
 }): Promise<OrganizationDetail> {
   return request<OrganizationDetail>(`${BASE}/orgs`, {
     method: 'POST',
@@ -247,6 +248,7 @@ export async function updateOrg(orgId: string, data: Partial<{
   teams: Record<string, string[]>
   flat_mode_agents: string[]
   agent_final_weights: Record<string, number>
+  pipeline_params: Record<string, unknown>
 }>): Promise<Organization> {
   return request<Organization>(`${BASE}/orgs/${orgId}`, {
     method: 'PATCH',
@@ -288,4 +290,78 @@ export async function updateAgent(orgId: string, agentId: string, data: Partial<
 
 export async function deleteAgent(orgId: string, agentId: string): Promise<void> {
   await fetch(`${BASE}/orgs/${orgId}/agents/${agentId}`, { method: 'DELETE' })
+}
+
+// ── Silos ──────────────────────────────────────────────────────
+
+export async function createSilo(orgId: string, data: {
+  name: string
+  description?: string
+  color?: string
+  sort_order?: number
+}): Promise<OrgSilo> {
+  return request<OrgSilo>(`${BASE}/orgs/${orgId}/silos`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateSilo(orgId: string, siloId: string, data: Partial<{
+  name: string
+  description: string
+  color: string
+  sort_order: number
+}>): Promise<OrgSilo> {
+  return request<OrgSilo>(`${BASE}/orgs/${orgId}/silos/${siloId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteSilo(orgId: string, siloId: string): Promise<void> {
+  await fetch(`${BASE}/orgs/${orgId}/silos/${siloId}`, { method: 'DELETE' })
+}
+
+// ── Chapters ──────────────────────────────────────────────────────
+
+export async function createChapter(orgId: string, data: {
+  name: string
+  description?: string
+  shared_directives?: string[]
+  shared_constraints?: string[]
+  shared_decision_focus?: string[]
+  chapter_prompt?: string
+  color?: string
+  icon?: string
+  sort_order?: number
+}): Promise<OrgChapter> {
+  return request<OrgChapter>(`${BASE}/orgs/${orgId}/chapters`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateChapter(orgId: string, chapterId: string, data: Partial<{
+  name: string
+  description: string
+  shared_directives: string[]
+  shared_constraints: string[]
+  shared_decision_focus: string[]
+  chapter_prompt: string
+  color: string
+  icon: string
+  sort_order: number
+}>): Promise<OrgChapter> {
+  return request<OrgChapter>(`${BASE}/orgs/${orgId}/chapters/${chapterId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteChapter(orgId: string, chapterId: string): Promise<void> {
+  await fetch(`${BASE}/orgs/${orgId}/chapters/${chapterId}`, { method: 'DELETE' })
 }
