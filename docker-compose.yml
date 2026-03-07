@@ -3,15 +3,15 @@ services:
     image: postgres:16-alpine
     container_name: ora-automation-db
     environment:
-      POSTGRES_DB: ora_automation
-      POSTGRES_USER: ora
-      POSTGRES_PASSWORD: ora
+      POSTGRES_DB: ${POSTGRES_DB:-ora_automation}
+      POSTGRES_USER: ${POSTGRES_USER:-ora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ora}
     ports:
       - "5432:5432"
     volumes:
       - ora_automation_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ora -d ora_automation"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ora} -d ${POSTGRES_DB:-ora_automation}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -36,8 +36,8 @@ services:
     working_dir: /workspace/Ora/ora-automation
     command: uvicorn ora_automation_api.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src
     environment:
-      DATABASE_URL: postgresql+psycopg://ora:ora@db:5432/ora_automation
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      DATABASE_URL: ${DATABASE_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
       RABBITMQ_EXCHANGE: ora.automation
       RABBITMQ_RETRY_EXCHANGE: ora.automation.retry
       RABBITMQ_DLX_EXCHANGE: ora.automation.dlx
@@ -50,12 +50,12 @@ services:
       PYTHONUNBUFFERED: "1"
       # Gemini (for chat endpoint)
       ORA_RD_LLM_PROVIDER: gemini
-      GEMINI_MODEL: gemini-2.5-flash
-      GOOGLE_CLOUD_PROJECT_ID: ora-project-474413
-      GOOGLE_CLOUD_LOCATION: asia-northeast3
-      GOOGLE_APPLICATION_CREDENTIALS: /workspace/Ora/ora-automation/google-service-account.json
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GOOGLE_CLOUD_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT_ID}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-asia-northeast3}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
       ORA_RD_GEMINI_DISABLE_VERTEX: "0"
-      GOOGLE_CLOUD_FALLBACK_LOCATIONS: us-central1,us-east1,europe-west1
+      GOOGLE_CLOUD_FALLBACK_LOCATIONS: ${GOOGLE_CLOUD_FALLBACK_LOCATIONS:-us-central1,us-east1,europe-west1}
     ports:
       - "8000:8000"
     depends_on:
@@ -84,8 +84,8 @@ services:
     working_dir: /workspace/Ora/ora-automation
     command: python -m ora_automation_api.worker --agent-role ceo
     environment: &worker-env
-      DATABASE_URL: postgresql+psycopg://ora:ora@db:5432/ora_automation
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      DATABASE_URL: ${DATABASE_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
       RABBITMQ_EXCHANGE: ora.automation
       RABBITMQ_RETRY_EXCHANGE: ora.automation.retry
       RABBITMQ_DLX_EXCHANGE: ora.automation.dlx
@@ -95,14 +95,14 @@ services:
       PYTHONUNBUFFERED: "1"
       # LLM / Gemini
       ORA_RD_LLM_PROVIDER: gemini
-      GEMINI_MODEL: gemini-2.5-flash
-      GOOGLE_CLOUD_PROJECT_ID: ora-project-474413
-      GOOGLE_CLOUD_LOCATION: asia-northeast3
-      GOOGLE_APPLICATION_CREDENTIALS: /workspace/Ora/ora-automation/google-service-account.json
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GOOGLE_CLOUD_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT_ID}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-asia-northeast3}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
       ORA_RD_GEMINI_DISABLE_VERTEX: "0"
-      GOOGLE_CLOUD_FALLBACK_LOCATIONS: us-central1,us-east1,europe-west1
-      EMBEDDING_LOCATION: asia-northeast3
-      MCP_GEMINI_MODEL: gemini-2.5-flash
+      GOOGLE_CLOUD_FALLBACK_LOCATIONS: ${GOOGLE_CLOUD_FALLBACK_LOCATIONS:-us-central1,us-east1,europe-west1}
+      EMBEDDING_LOCATION: ${GOOGLE_CLOUD_LOCATION:-asia-northeast3}
+      MCP_GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
     depends_on:
       db:
         condition: service_healthy

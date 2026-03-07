@@ -13,6 +13,7 @@ __pycache__/
 # Secrets & credentials
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 google-service-account.json

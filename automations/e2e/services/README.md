@@ -13,7 +13,7 @@
 ## 기본 실행
 
 ```bash
-cd /Users/mike/workspace/side_project/Ora/ora-automation
+cd /path/to/ora-automation
 
 # B2B
 make e2e-service SERVICE=b2b

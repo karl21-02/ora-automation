@@ -134,7 +134,7 @@ COPY src/ scripts/ automations/ research_reports/ ./
 |------|---|------|
 | `ORA_RD_LLM_PROVIDER` | `gemini` | LLM 프로바이더 |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini 모델명 |
-| `GOOGLE_CLOUD_PROJECT_ID` | `ora-project-474413` | GCP 프로젝트 |
+| `GOOGLE_CLOUD_PROJECT_ID` | `.env`에서 설정 | GCP 프로젝트 |
 | `GOOGLE_CLOUD_LOCATION` | `asia-northeast3` | 기본 리전 |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `/workspace/Ora/ora-automation/google-service-account.json` | 서비스 계정 키 |
 | `ORA_RD_GEMINI_DISABLE_VERTEX` | `0` | Vertex AI 사용 여부 |
