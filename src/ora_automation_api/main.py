@@ -85,6 +85,7 @@ def _run_ddl_migrations() -> None:
         "ALTER TABLE orchestration_runs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
         "ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS dialog_context JSONB",
         "ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS dialog_context_version INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS org_id VARCHAR(36) REFERENCES organizations(id) ON DELETE SET NULL",
         # Notion sync state
         """CREATE TABLE IF NOT EXISTS notion_sync_state (
             id SERIAL PRIMARY KEY,
@@ -625,6 +626,7 @@ def create_batch_runs(
             user_prompt=payload.user_prompt,
             target=plan.target,
             env=plan.env,
+            org_id=payload.org_id,
         )
         run, created = create_run(db, run_payload)
         if run.status != "dry-run" and created:

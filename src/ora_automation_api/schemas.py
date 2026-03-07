@@ -153,6 +153,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
     conversation_id: str | None = None
     history: list[ChatMessage] = Field(default_factory=list)
+    org_id: str | None = Field(default=None, max_length=36)
 
 
 class ChatPlan(BaseModel):
@@ -182,6 +183,7 @@ class ChatResponse(BaseModel):
 class BatchRunCreate(BaseModel):
     user_prompt: str = Field(..., min_length=1, max_length=4000)
     plans: list[ChatPlan]
+    org_id: str | None = Field(default=None, max_length=36)
 
 
 class BatchRunResponse(BaseModel):
@@ -211,10 +213,10 @@ class ChatMessageRead(BaseModel):
 
 
 class ConversationRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: str
     title: str
+    org_id: str | None = None
+    org_name: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -226,6 +228,12 @@ class ConversationDetail(ConversationRead):
 class ConversationCreate(BaseModel):
     id: str | None = None
     title: str = ""
+    org_id: str | None = Field(default=None, max_length=36)
+
+
+class ConversationUpdate(BaseModel):
+    title: str | None = None
+    org_id: str | None = None  # empty string = unbind
 
 
 class ConversationList(BaseModel):

@@ -46,11 +46,12 @@ export async function sendChatStream(
   history: ChatHistoryMessage[] = [],
   conversationId?: string,
   onEvent: (event: StreamEvent) => void = () => {},
+  orgId?: string | null,
 ): Promise<void> {
   const res = await fetch(`${BASE}/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, history, conversation_id: conversationId }),
+    body: JSON.stringify({ message, history, conversation_id: conversationId, org_id: orgId ?? undefined }),
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -95,7 +96,7 @@ export async function getReport(filename: string): Promise<string> {
   return res.text()
 }
 
-export async function createRun(plan: ChatPlan, userPrompt: string): Promise<OrchestrationRun> {
+export async function createRun(plan: ChatPlan, userPrompt: string, orgId?: string | null): Promise<OrchestrationRun> {
   return request<OrchestrationRun>(`${BASE}/orchestrations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -103,6 +104,7 @@ export async function createRun(plan: ChatPlan, userPrompt: string): Promise<Orc
       user_prompt: userPrompt,
       target: plan.target,
       env: plan.env,
+      org_id: orgId ?? undefined,
     }),
   })
 }
@@ -110,11 +112,12 @@ export async function createRun(plan: ChatPlan, userPrompt: string): Promise<Orc
 export async function createBatchRuns(
   plans: ChatPlan[],
   userPrompt: string,
+  orgId?: string | null,
 ): Promise<{ runs: OrchestrationRun[] }> {
   return request<{ runs: OrchestrationRun[] }>(`${BASE}/orchestrations/batch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_prompt: userPrompt, plans }),
+    body: JSON.stringify({ user_prompt: userPrompt, plans, org_id: orgId ?? undefined }),
   })
 }
 
@@ -135,6 +138,8 @@ export async function listRuns(): Promise<{ items: OrchestrationRun[]; total: nu
 export interface ConversationSummary {
   id: string
   title: string
+  org_id: string | null
+  org_name: string | null
   created_at: string
   updated_at: string
 }
@@ -155,11 +160,11 @@ export async function listConversations(limit = 50): Promise<{ items: Conversati
   return request<{ items: ConversationSummary[]; total: number }>(`${BASE}/conversations?limit=${limit}`)
 }
 
-export async function createConversation(id?: string, title = ''): Promise<ConversationSummary> {
+export async function createConversation(id?: string, title = '', orgId?: string | null): Promise<ConversationSummary> {
   return request<ConversationSummary>(`${BASE}/conversations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, title }),
+    body: JSON.stringify({ id, title, org_id: orgId ?? undefined }),
   })
 }
 
@@ -176,6 +181,14 @@ export async function renameConversation(id: string, title: string): Promise<Con
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title }),
+  })
+}
+
+export async function updateConversationOrg(id: string, orgId: string | null): Promise<ConversationSummary> {
+  return request<ConversationSummary>(`${BASE}/conversations/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ org_id: orgId ?? '' }),
   })
 }
 

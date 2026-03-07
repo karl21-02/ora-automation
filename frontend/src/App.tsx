@@ -3,17 +3,19 @@ import ChatWindow from './components/ChatWindow'
 import OrgPanel from './components/OrgPanel'
 import ReportViewer from './components/ReportViewer'
 import Sidebar from './components/Sidebar'
-import { createConversation, deleteConversation, getConversation, listConversations, renameConversation } from './lib/api'
-import type { Conversation, Message } from './types'
+import { createConversation, deleteConversation, getConversation, listConversations, listOrgs, renameConversation, updateConversationOrg } from './lib/api'
+import type { Conversation, Message, Organization } from './types'
 
 const ACTIVE_KEY = 'ora-chatbot-active-id'
 
-function newConversation(): Conversation {
+function newConversation(orgId?: string | null): Conversation {
   return {
     id: crypto.randomUUID(),
     title: '',
     messages: [],
     createdAt: new Date(),
+    orgId: orgId ?? null,
+    orgName: null,
   }
 }
 
@@ -23,9 +25,15 @@ export default function App() {
   const [reportFile, setReportFile] = useState<string | null>(null)
   const [showOrgs, setShowOrgs] = useState(false)
   const [dbReady, setDbReady] = useState(false)
+  const [orgs, setOrgs] = useState<Organization[]>([])
+
+  const refreshOrgs = useCallback(() => {
+    listOrgs().then(({ items }) => setOrgs(items)).catch(() => setOrgs([]))
+  }, [])
 
   // Load conversations from DB on mount
   useEffect(() => {
+    refreshOrgs()
     let cancelled = false
     async function load() {
       try {
@@ -41,6 +49,8 @@ export default function App() {
                 return {
                   id: detail.id,
                   title: detail.title,
+                  orgId: detail.org_id ?? null,
+                  orgName: detail.org_name ?? null,
                   createdAt: new Date(detail.created_at),
                   messages: detail.messages.map((m) => {
                     const planData = m.plan as Record<string, unknown> | null
@@ -73,6 +83,8 @@ export default function App() {
                 return {
                   id: item.id,
                   title: item.title,
+                  orgId: item.org_id ?? null,
+                  orgName: item.org_name ?? null,
                   createdAt: new Date(item.created_at),
                   messages: [],
                 }
@@ -141,10 +153,10 @@ export default function App() {
     )
   }, [activeId])
 
-  const handleNewConversation = useCallback(async () => {
-    const conv = newConversation()
+  const handleNewConversation = useCallback(async (orgId?: string | null) => {
+    const conv = newConversation(orgId)
     try {
-      await createConversation(conv.id, conv.title)
+      await createConversation(conv.id, conv.title, orgId)
     } catch {
       // proceed locally even if DB fails
     }
@@ -172,6 +184,18 @@ export default function App() {
       return remaining
     })
   }, [activeId])
+
+  const handleChangeConversationOrg = useCallback(async (convId: string, orgId: string | null) => {
+    const orgName = orgId ? orgs.find((o) => o.id === orgId)?.name ?? null : null
+    setConversations((prev) =>
+      prev.map((c) => (c.id === convId ? { ...c, orgId, orgName } : c))
+    )
+    try {
+      await updateConversationOrg(convId, orgId)
+    } catch {
+      // local state already updated
+    }
+  }, [orgs])
 
   const handleRenameConversation = useCallback(async (id: string, title: string) => {
     setConversations((prev) =>
@@ -211,14 +235,15 @@ export default function App() {
         conversations={conversations}
         activeConversationId={activeId}
         onSelectConversation={(id) => { setShowOrgs(false); setActiveId(id) }}
-        onNewConversation={() => { setShowOrgs(false); handleNewConversation() }}
+        onNewConversation={(orgId) => { setShowOrgs(false); handleNewConversation(orgId) }}
         onSelectReport={(f) => { setShowOrgs(false); setReportFile(f) }}
         onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}
         onOpenOrgs={() => setShowOrgs(true)}
+        orgs={orgs}
       />
       {showOrgs ? (
-        <OrgPanel />
+        <OrgPanel onOrgsChanged={refreshOrgs} />
       ) : (
         <ChatWindow
           key={activeConv.id}
@@ -226,6 +251,10 @@ export default function App() {
           onNewMessage={handleNewMessage}
           onUpdateMessage={handleUpdateMessage}
           conversationId={activeConv.id}
+          orgId={activeConv.orgId ?? null}
+          orgName={activeConv.orgName ?? null}
+          orgs={orgs}
+          onChangeOrg={(orgId) => handleChangeConversationOrg(activeConv.id, orgId)}
         />
       )}
       {reportFile && (

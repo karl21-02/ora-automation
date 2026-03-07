@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createBatchRuns, createRun, getRun, getRunEvents, sendChatStream, type ChatHistoryMessage } from '../lib/api'
 import { APP_NAME } from '../lib/constants'
-import type { ChatPlan, DialogState, Message, OrchestrationEvent, OrchestrationRun } from '../types'
+import type { ChatPlan, DialogState, Message, OrchestrationEvent, OrchestrationRun, Organization } from '../types'
 import MessageBubble from './MessageBubble'
 
 interface Props {
@@ -9,6 +9,10 @@ interface Props {
   onNewMessage: (msg: Message) => void
   onUpdateMessage: (id: string, updates: Partial<Message>) => void
   conversationId: string
+  orgId: string | null
+  orgName: string | null
+  orgs: Organization[]
+  onChangeOrg: (orgId: string | null) => void
 }
 
 const STAGE_COLORS: Record<string, string> = {
@@ -18,7 +22,7 @@ const STAGE_COLORS: Record<string, string> = {
   validation: '#f59e0b',
 }
 
-export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, conversationId }: Props) {
+export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, conversationId, orgId, orgName, orgs, onChangeOrg }: Props) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [streaming, setStreaming] = useState(false)
@@ -157,7 +161,7 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
             content: `Error: ${event.content || 'unknown error'}`,
           })
         }
-      })
+      }, orgId)
     } catch (e) {
       if (streamedContent) {
         onUpdateMessage(assistantId, {
@@ -172,7 +176,7 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
       setLoading(false)
       setStreaming(false)
     }
-  }, [input, loading, conversationId, onNewMessage, onUpdateMessage, messages])
+  }, [input, loading, conversationId, onNewMessage, onUpdateMessage, messages, orgId])
 
   const handleExecute = useCallback(async (plan: ChatPlan, confirmViaChat?: boolean) => {
     // UPCE mode: send "확인" as a chat message instead of direct API call
@@ -187,7 +191,7 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
     setExecutingPlanId(plan.target)
     setRunEvents([])
     try {
-      const run = await createRun(plan, prompt)
+      const run = await createRun(plan, prompt, orgId)
       setActiveRunIds([run.id])
       setRunStatuses({ [run.id]: run })
       onNewMessage({
@@ -215,7 +219,7 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
     setExecutingPlanId('batch')
     setRunEvents([])
     try {
-      const { runs } = await createBatchRuns(plans, prompt)
+      const { runs } = await createBatchRuns(plans, prompt, orgId)
       const ids = runs.map((r) => r.id)
       setActiveRunIds(ids)
       const statuses: Record<string, OrchestrationRun> = {}
@@ -289,6 +293,40 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
       flexDirection: 'column',
       height: '100%',
     }}>
+      {/* Org selector bar */}
+      {orgs.length > 0 && (
+        <div style={{
+          padding: '8px 16px',
+          borderBottom: '1px solid #e5e7eb',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          backgroundColor: '#f9fafb',
+        }}>
+          <span style={{ fontSize: 14 }}>{'\u{1F3E2}'}</span>
+          <select
+            value={orgId ?? ''}
+            onChange={(e) => onChangeOrg(e.target.value || null)}
+            style={{
+              flex: 1,
+              padding: '4px 8px',
+              borderRadius: 6,
+              border: '1px solid #d1d5db',
+              backgroundColor: '#fff',
+              fontSize: 13,
+              color: '#374151',
+              outline: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="">{'\u{1F4CE}'} 미분류 (기본 프리셋)</option>
+            {orgs.map((org) => (
+              <option key={org.id} value={org.id}>{org.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Messages */}
       <div style={{
         flex: 1,

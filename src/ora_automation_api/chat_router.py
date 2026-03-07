@@ -41,7 +41,7 @@ from .dialog_engine import (
     run_stage2_stream,
     run_stage2_sync,
 )
-from .models import ChatConversation, ChatMessageRow
+from .models import ChatConversation, ChatMessageRow, Organization
 from .scheduling_handler import ScheduleValidationError, create_scheduled_job_from_slots
 from .schemas import (
     ChatChoice,
@@ -53,6 +53,7 @@ from .schemas import (
     ConversationDetail,
     ConversationList,
     ConversationRead,
+    ConversationUpdate,
     ProjectInfo,
     ReportListItem,
 )
@@ -573,13 +574,22 @@ def _inject_project_select(
 # ── Endpoints ────────────────────────────────────────────────────────
 
 
-def _ensure_conversation(db: Session, conversation_id: str | None) -> ChatConversation:
+def _resolve_org_name(db: Session, org_id: str | None) -> str | None:
+    if not org_id:
+        return None
+    org = db.get(Organization, org_id)
+    return org.name if org else None
+
+
+def _ensure_conversation(db: Session, conversation_id: str | None, org_id: str | None = None) -> ChatConversation:
     """Get or create a conversation row."""
     if conversation_id:
         conv = db.get(ChatConversation, conversation_id)
         if conv:
+            if org_id and not conv.org_id:
+                conv.org_id = org_id
             return conv
-    conv = ChatConversation(id=conversation_id or str(uuid.uuid4()), title="")
+    conv = ChatConversation(id=conversation_id or str(uuid.uuid4()), title="", org_id=org_id)
     db.add(conv)
     db.flush()
     return conv
@@ -661,7 +671,7 @@ def _save_dialog_context(
 
 def _chat_upce(req: ChatRequest, db: Session) -> ChatResponse:
     """2-stage UPCE pipeline for non-streaming chat."""
-    conv = _ensure_conversation(db, req.conversation_id)
+    conv = _ensure_conversation(db, req.conversation_id, org_id=req.org_id)
     if not conv.title and req.message:
         conv.title = req.message[:100]
 
@@ -798,7 +808,7 @@ def _chat_upce(req: ChatRequest, db: Session) -> ChatResponse:
 
 def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
     """2-stage UPCE pipeline with SSE streaming."""
-    conv = _ensure_conversation(db, req.conversation_id)
+    conv = _ensure_conversation(db, req.conversation_id, org_id=req.org_id)
     if not conv.title and req.message:
         conv.title = req.message[:100]
 
@@ -1057,7 +1067,7 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     )
 
     # Persist to DB
-    conv = _ensure_conversation(db, req.conversation_id)
+    conv = _ensure_conversation(db, req.conversation_id, org_id=req.org_id)
     if not conv.title and req.message:
         conv.title = req.message[:100]
     _persist_message(db, conv.id, "user", req.message)
@@ -1088,7 +1098,7 @@ def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> StreamingRes
     system_prompt = _build_system_prompt()
 
     # Persist user message before streaming starts
-    conv = _ensure_conversation(db, req.conversation_id)
+    conv = _ensure_conversation(db, req.conversation_id, org_id=req.org_id)
     if not conv.title and req.message:
         conv.title = req.message[:100]
     _persist_message(db, conv.id, "user", req.message)
@@ -1165,17 +1175,31 @@ def list_projects() -> list[ProjectInfo]:
 @router.get("/conversations", response_model=ConversationList)
 def list_conversations(
     limit: int = Query(default=50, ge=1, le=200),
+    org_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> ConversationList:
-    rows = (
-        db.query(ChatConversation)
-        .order_by(ChatConversation.updated_at.desc())
-        .limit(limit)
-        .all()
+    query = (
+        db.query(ChatConversation, Organization.name)
+        .outerjoin(Organization, ChatConversation.org_id == Organization.id)
     )
-    total = db.query(ChatConversation).count()
+    count_query = db.query(ChatConversation)
+    if org_id is not None:
+        query = query.filter(ChatConversation.org_id == org_id)
+        count_query = count_query.filter(ChatConversation.org_id == org_id)
+    rows = query.order_by(ChatConversation.updated_at.desc()).limit(limit).all()
+    total = count_query.count()
     return ConversationList(
-        items=[ConversationRead.model_validate(r) for r in rows],
+        items=[
+            ConversationRead(
+                id=conv.id,
+                title=conv.title,
+                org_id=conv.org_id,
+                org_name=org_name,
+                created_at=conv.created_at,
+                updated_at=conv.updated_at,
+            )
+            for conv, org_name in rows
+        ],
         total=total,
     )
 
@@ -1188,11 +1212,20 @@ def create_conversation(
     conv = ChatConversation(
         id=payload.id or str(uuid.uuid4()),
         title=payload.title,
+        org_id=payload.org_id or None,
     )
     db.add(conv)
     db.commit()
     db.refresh(conv)
-    return ConversationRead.model_validate(conv)
+    org_name = _resolve_org_name(db, conv.org_id)
+    return ConversationRead(
+        id=conv.id,
+        title=conv.title,
+        org_id=conv.org_id,
+        org_name=org_name,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+    )
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
@@ -1209,8 +1242,14 @@ def get_conversation(
         .order_by(ChatMessageRow.created_at.asc())
         .all()
     )
+    org_name = _resolve_org_name(db, conv.org_id)
     return ConversationDetail(
-        **ConversationRead.model_validate(conv).model_dump(),
+        id=conv.id,
+        title=conv.title,
+        org_id=conv.org_id,
+        org_name=org_name,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
         messages=[ChatMessageRead.model_validate(m) for m in messages],
     )
 
@@ -1229,18 +1268,29 @@ def delete_conversation(
 
 
 @router.patch("/conversations/{conversation_id}", response_model=ConversationRead)
-def update_conversation_title(
+def update_conversation(
     conversation_id: str,
-    payload: ConversationCreate,
+    payload: ConversationUpdate,
     db: Session = Depends(get_db),
 ) -> ConversationRead:
     conv = db.get(ChatConversation, conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="conversation not found")
-    conv.title = payload.title
+    if payload.title is not None:
+        conv.title = payload.title
+    if payload.org_id is not None:
+        conv.org_id = payload.org_id if payload.org_id else None
     db.commit()
     db.refresh(conv)
-    return ConversationRead.model_validate(conv)
+    org_name = _resolve_org_name(db, conv.org_id)
+    return ConversationRead(
+        id=conv.id,
+        title=conv.title,
+        org_id=conv.org_id,
+        org_name=org_name,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+    )
 
 
 # ── Reports ──────────────────────────────────────────────────────────

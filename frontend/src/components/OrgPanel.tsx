@@ -7,7 +7,11 @@ import OrgChart from './OrgChart'
 import OrgDesigner from './OrgDesigner'
 import OrgEditor from './OrgEditor'
 
-export default function OrgPanel() {
+interface OrgPanelProps {
+  onOrgsChanged?: () => void
+}
+
+export default function OrgPanel({ onOrgsChanged }: OrgPanelProps = {}) {
   const [orgs, setOrgs] = useState<Organization[]>([])
   const [selectedOrg, setSelectedOrg] = useState<OrganizationDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -24,11 +28,12 @@ export default function OrgPanel() {
     try {
       const { items } = await listOrgs()
       setOrgs(items)
+      onOrgsChanged?.()
     } catch {
       setError('Failed to load organizations')
     }
     setLoading(false)
-  }, [])
+  }, [onOrgsChanged])
 
   useEffect(() => { refresh() }, [refresh])
 

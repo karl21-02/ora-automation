@@ -90,6 +90,8 @@ export interface Conversation {
   title: string
   messages: Message[]
   createdAt: Date
+  orgId?: string | null
+  orgName?: string | null
 }
 
 // ── Scheduler ──────────────────────────────────────────────────────
