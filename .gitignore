@@ -35,3 +35,11 @@ node_modules/
 dist/
 build/
 *.egg-info/
+
+# Test / coverage
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Research output
+research_reports/

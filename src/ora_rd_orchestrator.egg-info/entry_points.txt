@@ -1,5 +1,0 @@
-[console_scripts]
-ora-automation-api = ora_automation_api.main:main
-ora-automation-chatbot = ora_rd_orchestrator.chatbot:main
-ora-automation-worker = ora_automation_api.worker:main
-ora-rd-orchestrator = ora_rd_orchestrator.cli:main

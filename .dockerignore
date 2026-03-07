@@ -5,8 +5,20 @@ __pycache__
 *.pyc
 *.pyo
 *.pyd
+*.egg-info
 .pytest_cache
 node_modules
-research_reports/runs/docker
 dist
 build
+docs/
+
+# Secrets — Docker 이미지에 포함 방지
+google-service-account.json
+credentials.json
+.env
+.env.*
+*.pem
+*.key
+
+# Research output
+research_reports/
