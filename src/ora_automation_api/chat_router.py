@@ -21,11 +21,11 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from ora_rd_orchestrator.chatbot import (
+from .plan_utils import (
     ALLOWED_ENV_KEYS,
     ALLOWED_TARGETS,
-    _coerce_plan,
-    _extract_json,
+    coerce_plan as _coerce_plan,
+    extract_json as _extract_json,
 )
 from ora_rd_orchestrator.gemini_provider import _get_ssl_context
 

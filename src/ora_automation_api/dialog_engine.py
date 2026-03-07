@@ -15,7 +15,7 @@ from urllib import error, request
 
 from pydantic import BaseModel, Field
 
-from ora_rd_orchestrator.chatbot import ALLOWED_ENV_KEYS, ALLOWED_TARGETS, _coerce_plan
+from .plan_utils import ALLOWED_ENV_KEYS, ALLOWED_TARGETS, coerce_plan as _coerce_plan
 from ora_rd_orchestrator.gemini_provider import _get_gemini_token, _get_ssl_context, _urlopen
 
 from .schemas import ChatPlan, ProjectInfo
