@@ -334,7 +334,7 @@ def generate_report(
     # 0. Normalize inputs
     # ------------------------------------------------------------------
     agent_mode = (agent_mode or "flat").strip().lower()
-    if agent_mode not in ("flat", "hierarchical"):
+    if agent_mode not in ("flat", "hierarchical", "convergence"):
         agent_mode = "flat"
 
     profile = (orchestration_profile or ORCHESTRATION_PROFILE_DEFAULT).strip().lower()
@@ -802,7 +802,57 @@ def generate_report(
     effective_rounds = max(0, debate_rounds)
     llm_deliberation_command = llm_deliberation_cmd or os.getenv(LLM_DELIBERATION_CMD_ENV) or llm_consensus_cmd
 
-    if ORCHESTRATION_STAGE_DELIBERATION in stages and effective_rounds > 0:
+    # ------------------------------------------------------------------
+    # CONVERGENCE MODE — 3-level pipeline via LangGraph
+    # ------------------------------------------------------------------
+    if agent_mode == "convergence" and org_config and org_config.get("chapters"):
+        from .convergence import run_convergence_pipeline
+
+        _notify_progress(progress_callback, "convergence", "Starting 3-level convergence pipeline")
+        stage_log.append({
+            "stage": "convergence_pipeline",
+            "status": "started",
+            "message": "agent_mode=convergence",
+        })
+
+        convergence_state = run_convergence_pipeline(
+            org_config=org_config,
+            topic_states=states,
+            initial_scores=scores,
+            personas=personas,
+            agent_definitions=agent_definitions or {},
+            llm_command=llm_deliberation_command,
+            llm_timeout=max(1.0, llm_deliberation_timeout),
+            service_scope=service_scope_list,
+            stages=stages,
+            cancel_event=cancel_event,
+            progress_callback=progress_callback,
+        )
+
+        scores = convergence_state.final_scores
+        pipeline_decisions = convergence_state.decisions
+        discussion = [{"stage": "convergence", "log": convergence_state.execution_log}]
+        stage_log.extend(convergence_state.execution_log)
+
+        stage_log.append({
+            "stage": "convergence_pipeline",
+            "status": "completed",
+            "message": (
+                f"level1_chapters={len(convergence_state.level1_results)}, "
+                f"level2_silos={len(convergence_state.level2_results)}, "
+                f"level3_rounds={convergence_state.level3_rounds}"
+            ),
+        })
+
+        # Build ranked + selected, then skip flat deliberation → go to consensus
+        ranked = build_final_score(states, scores)
+        selected = ranked[:top_k]
+
+        # → Jump to fallback decisions check + consensus (same as flat mode)
+        _notify_progress(progress_callback, "deliberation", "Convergence pipeline completed")
+        _check_cancel(cancel_event)
+
+    elif ORCHESTRATION_STAGE_DELIBERATION in stages and effective_rounds > 0:
         if not llm_deliberation_command and _get_provider() is None:
             raise RuntimeError(
                 "LLM deliberation requires either --llm-deliberation-cmd or "

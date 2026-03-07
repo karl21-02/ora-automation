@@ -176,6 +176,41 @@ class HierarchicalPipelineState:
     execution_log: list[dict] = field(default_factory=list)
 
 
+@dataclass
+class ChapterDeliberationResult:
+    chapter_id: str
+    chapter_name: str
+    agent_ids: list[str]
+    topic_scores: dict[str, dict[str, float]]  # {topic_id: {score_key: val}}
+    rounds_executed: int
+    converged: bool
+    discussion: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class SiloDeliberationResult:
+    silo_id: str
+    silo_name: str
+    chapter_ids: list[str]
+    topic_scores: dict[str, float]  # {topic_id: aggregated_score}
+    rounds_executed: int
+    converged: bool
+    discussion: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class ConvergencePipelineState:
+    level1_results: list[ChapterDeliberationResult] = field(default_factory=list)
+    clevel_scores: dict[str, dict[str, float]] = field(default_factory=dict)
+    level2_results: list[SiloDeliberationResult] = field(default_factory=list)
+    level3_scores: dict[str, dict[str, float]] = field(default_factory=dict)
+    level3_rounds: int = 0
+    level3_converged: bool = False
+    final_scores: dict[str, dict[str, float]] = field(default_factory=dict)
+    decisions: list[OrchestrationDecision] = field(default_factory=list)
+    execution_log: list[dict] = field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # New types for LLM-driven orchestration
 # ---------------------------------------------------------------------------

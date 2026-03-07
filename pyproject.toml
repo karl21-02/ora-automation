@@ -16,6 +16,7 @@ dependencies = [
     "google-auth>=2.35.0",
     "requests>=2.32.0",
     "apscheduler>=3.10.0,<4.0.0",
+    "langgraph>=1.0.0,<2.0.0",
 ]
 
 [project.scripts]
