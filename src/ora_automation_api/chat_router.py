@@ -41,7 +41,7 @@ from .dialog_engine import (
     run_stage2_stream,
     run_stage2_sync,
 )
-from .models import ChatConversation, ChatMessageRow, Organization
+from .models import ChatConversation, ChatMessageRow, Organization, OrganizationChapter
 from .scheduling_handler import ScheduleValidationError, create_scheduled_job_from_slots
 from .schemas import (
     ChatChoice,
@@ -574,6 +574,43 @@ def _inject_project_select(
 # ── Endpoints ────────────────────────────────────────────────────────
 
 
+def _build_org_context_for_dialog(db: Session, org_id: str | None) -> str:
+    """Build a lightweight org context string for dialog engine prompts."""
+    if not org_id:
+        return ""
+    org = db.get(Organization, org_id)
+    if not org:
+        return ""
+
+    lines = [f"## Organization: {org.name}"]
+    if org.description:
+        lines.append(f"Description: {org.description}")
+
+    params = org.pipeline_params or {}
+    if params:
+        lines.append(f"Pipeline config: {json.dumps(params, ensure_ascii=False)}")
+
+    chapters = (
+        db.query(OrganizationChapter)
+        .filter(OrganizationChapter.org_id == org_id)
+        .order_by(OrganizationChapter.sort_order)
+        .all()
+    )
+    if chapters:
+        lines.append("Organization chapters:")
+        for ch in chapters:
+            directives = ch.shared_directives or []
+            constraints = ch.shared_constraints or []
+            ch_line = f"  - {ch.name}"
+            if directives:
+                ch_line += f" (directives: {'; '.join(directives)})"
+            if constraints:
+                ch_line += f" (constraints: {'; '.join(constraints)})"
+            lines.append(ch_line)
+
+    return "\n".join(lines)
+
+
 def _resolve_org_name(db: Session, org_id: str | None) -> str | None:
     if not org_id:
         return None
@@ -678,9 +715,10 @@ def _chat_upce(req: ChatRequest, db: Session) -> ChatResponse:
     dialog_ctx, ctx_version = _get_dialog_context(conv)
     projects = _scan_projects()
     history = [{"role": m.role, "content": m.content} for m in req.history]
+    org_context = _build_org_context_for_dialog(db, conv.org_id)
 
     # Stage 1: Understanding
-    classification = run_stage1(req.message, history, dialog_ctx, projects)
+    classification = run_stage1(req.message, history, dialog_ctx, projects, org_context=org_context)
     dialog_ctx = merge_slots(dialog_ctx, classification)
 
     # Short circuit: confirmation → no Stage 2 text needed
@@ -760,6 +798,7 @@ def _chat_upce(req: ChatRequest, db: Session) -> ChatResponse:
         reply = run_stage2_sync(
             classification, history, req.message,
             dialog_ctx, projects, settings.assistant_name,
+            org_context=org_context,
         )
     except Exception as exc:
         logger.error("Stage 2 sync failed: %s", exc)
@@ -815,6 +854,7 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
     dialog_ctx, ctx_version = _get_dialog_context(conv)
     projects = _scan_projects()
     history = [{"role": m.role, "content": m.content} for m in req.history]
+    org_context = _build_org_context_for_dialog(db, conv.org_id)
 
     # Persist user message
     _persist_message(db, conv.id, "user", req.message)
@@ -823,7 +863,7 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
 
     # Run Stage 1 before entering the generator (non-streaming, ~1-2s)
     try:
-        classification = run_stage1(req.message, history, dialog_ctx, projects)
+        classification = run_stage1(req.message, history, dialog_ctx, projects, org_context=org_context)
     except Exception as exc:
         logger.error("Stage 1 failed: %s", exc)
         # Fall back to a simple error response
@@ -963,6 +1003,7 @@ def _chat_stream_upce(req: ChatRequest, db: Session) -> StreamingResponse:
             for chunk in run_stage2_stream(
                 classification, history, req.message,
                 updated_ctx, projects, settings.assistant_name,
+                org_context=org_context,
             ):
                 full_text += chunk
                 data = json.dumps({"type": "token", "content": chunk}, ensure_ascii=False)

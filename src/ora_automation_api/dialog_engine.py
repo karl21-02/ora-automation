@@ -205,6 +205,8 @@ State: {current_state}
 Accumulated slots: {accumulated_slots}
 Turn count: {turn_count}
 
+{org_context}
+
 ## Intent types
 - research: User wants R&D analysis (run-cycle, run-cycle-deep, etc.)
 - testing: User wants E2E testing or QA (e2e-service, e2e-service-all, qa-program)
@@ -285,6 +287,7 @@ Return EXACTLY this JSON structure (no extra keys, no markdown):
 def _build_stage1_prompt(
     dialog_ctx: DialogContext,
     projects: list[ProjectInfo],
+    org_context: str = "",
 ) -> str:
     project_list = ", ".join(p.name for p in projects) if projects else "(none detected)"
     return _STAGE1_SYSTEM_PROMPT.format(
@@ -294,6 +297,7 @@ def _build_stage1_prompt(
         current_state=dialog_ctx.state.value,
         accumulated_slots=json.dumps(dialog_ctx.accumulated_slots, ensure_ascii=False),
         turn_count=dialog_ctx.turn_count,
+        org_context=org_context,
     )
 
 
@@ -302,9 +306,10 @@ def run_stage1(
     conversation_history: list[dict],
     dialog_ctx: DialogContext,
     projects: list[ProjectInfo],
+    org_context: str = "",
 ) -> IntentClassification:
     """Run Stage 1: Intent classification via Gemini JSON mode."""
-    system_prompt = _build_stage1_prompt(dialog_ctx, projects)
+    system_prompt = _build_stage1_prompt(dialog_ctx, projects, org_context=org_context)
 
     # Build contents: conversation history + current message
     contents: list[dict] = []
@@ -479,12 +484,14 @@ _STAGE2_PROMPTS: dict[DialogState, str] = {
 You are {assistant_name}, a friendly R&D orchestration assistant for the ora-automation platform.
 Respond naturally to the user in their language. Keep it conversational.
 Available projects: {project_list}
+{org_context}
 {response_guidance}""",
 
     DialogState.UNDERSTANDING: """\
 You are {assistant_name}, a friendly R&D orchestration assistant.
 The user has a new request but we need more clarity. Ask a focused clarifying question.
 Available projects: {project_list}
+{org_context}
 {response_guidance}""",
 
     DialogState.SLOT_FILLING: """\
@@ -493,6 +500,7 @@ We're gathering information for the user's request. Ask naturally about the miss
 Current slots: {accumulated_slots}
 Missing: {missing_slots}
 Available projects: {project_list}
+{org_context}
 {response_guidance}
 
 CRITICAL — Project picker rule:
@@ -503,6 +511,7 @@ Just ask naturally which projects they want to target. The system will show a pi
 You are {assistant_name}, a friendly R&D orchestration assistant.
 Present the execution plan clearly and ask the user to confirm.
 Plan details: {proposed_plans}
+{org_context}
 {response_guidance}
 
 Format the plan summary nicely in the user's language. End with a clear confirmation question like "실행할까요?" or "Shall I proceed?"
@@ -511,11 +520,13 @@ Do NOT include any JSON blocks in your response.""",
     DialogState.EXECUTING: """\
 You are {assistant_name}, a friendly R&D orchestration assistant.
 The user has confirmed. Acknowledge that execution is starting.
+{org_context}
 {response_guidance}""",
 
     DialogState.REPORTING: """\
 You are {assistant_name}, a friendly R&D orchestration assistant.
 Share results or report information with the user.
+{org_context}
 {response_guidance}""",
 }
 
@@ -525,6 +536,7 @@ def _build_stage2_prompt(
     dialog_ctx: DialogContext,
     projects: list[ProjectInfo],
     assistant_name: str,
+    org_context: str = "",
 ) -> str:
     """Build Stage 2 system prompt based on dialog state."""
     state = classification.next_state
@@ -546,6 +558,7 @@ def _build_stage2_prompt(
         accumulated_slots=json.dumps(dialog_ctx.accumulated_slots, ensure_ascii=False),
         missing_slots=missing_slots_str,
         proposed_plans=proposed_plans_str,
+        org_context=org_context,
     )
 
 
@@ -559,9 +572,10 @@ def run_stage2_stream(
     dialog_ctx: DialogContext,
     projects: list[ProjectInfo],
     assistant_name: str = "Ora",
+    org_context: str = "",
 ) -> Generator[str, None, None]:
     """Run Stage 2: Generate streaming response via Gemini."""
-    system_prompt = _build_stage2_prompt(classification, dialog_ctx, projects, assistant_name)
+    system_prompt = _build_stage2_prompt(classification, dialog_ctx, projects, assistant_name, org_context=org_context)
 
     contents: list[dict] = []
     for msg in conversation_history:
@@ -684,12 +698,13 @@ def run_stage2_sync(
     dialog_ctx: DialogContext,
     projects: list[ProjectInfo],
     assistant_name: str = "Ora",
+    org_context: str = "",
 ) -> str:
     """Run Stage 2 synchronously (non-streaming) by collecting all chunks."""
     chunks: list[str] = []
     for chunk in run_stage2_stream(
         classification, conversation_history, user_message,
-        dialog_ctx, projects, assistant_name,
+        dialog_ctx, projects, assistant_name, org_context=org_context,
     ):
         chunks.append(chunk)
     return "".join(chunks)
