@@ -812,3 +812,83 @@ class TestPresetSeedingStructure:
         assert loaded_chapter is not None
         merged = loaded_chapter.shared_directives + agent.behavioral_directives
         assert merged == ["be careful", "check twice", "agent specific"]
+
+
+class TestOrgConfigLoader:
+    def test_load_org_config_includes_silos_chapters(self, db):
+        from uuid import uuid4
+        from ora_automation_api.models import (
+            Organization, OrganizationAgent, OrganizationChapter, OrganizationSilo,
+        )
+        from ora_automation_api.service import _load_org_config
+
+        org = Organization(
+            id=uuid4().hex[:36], name="ConfigOrg", teams={},
+            flat_mode_agents=["CEO"], agent_final_weights={"CEO": 0.2},
+            pipeline_params={"top_k": 8},
+        )
+        db.add(org)
+        db.commit()
+
+        silo = OrganizationSilo(
+            id=uuid4().hex[:36], org_id=org.id, name="strategy",
+            description="Strategy silo", sort_order=0,
+        )
+        chapter = OrganizationChapter(
+            id=uuid4().hex[:36], org_id=org.id, name="StrategyCh",
+            shared_directives=["think big"], shared_constraints=["no bias"],
+            shared_decision_focus=["impact"], chapter_prompt="Be strategic.",
+            sort_order=0,
+        )
+        db.add_all([silo, chapter])
+        db.commit()
+
+        agent = OrganizationAgent(
+            id=uuid4().hex[:36], org_id=org.id, agent_id="CEO", display_name="CEO",
+            display_name_ko="대표", role="ceo", tier=4, domain="strategy", team="strategy",
+            silo_id=silo.id, chapter_id=chapter.id, is_clevel=True, weight_score=0.20,
+            personality={}, behavioral_directives=["lead"], constraints=[], decision_focus=[],
+            weights={"impact": 0.5}, trust_map={}, enabled=True,
+        )
+        db.add(agent)
+        db.commit()
+
+        config = _load_org_config(db, org.id)
+        assert config is not None
+        assert config["org_id"] == org.id
+        assert config["org_name"] == "ConfigOrg"
+        assert config["pipeline_params"] == {"top_k": 8}
+        assert config["flat_mode_agents"] == ["CEO"]
+        assert config["agent_final_weights"] == {"CEO": 0.2}
+
+        # silos
+        assert len(config["silos"]) == 1
+        assert config["silos"][0]["name"] == "strategy"
+        assert config["silos"][0]["description"] == "Strategy silo"
+
+        # chapters
+        assert len(config["chapters"]) == 1
+        ch = config["chapters"][0]
+        assert ch["name"] == "StrategyCh"
+        assert ch["shared_directives"] == ["think big"]
+        assert ch["shared_constraints"] == ["no bias"]
+        assert ch["shared_decision_focus"] == ["impact"]
+        assert ch["chapter_prompt"] == "Be strategic."
+
+        # agent fields
+        a = config["agents"][0]
+        assert a["agent_id"] == "CEO"
+        assert a["silo_id"] == silo.id
+        assert a["chapter_id"] == chapter.id
+        assert a["is_clevel"] is True
+        assert a["weight_score"] == 0.20
+
+    def test_load_org_config_none_returns_none(self, db):
+        from ora_automation_api.service import _load_org_config
+
+        assert _load_org_config(db, None) is None
+
+    def test_load_org_config_missing_org_returns_none(self, db):
+        from ora_automation_api.service import _load_org_config
+
+        assert _load_org_config(db, "nonexistent-id") is None

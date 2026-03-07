@@ -14,7 +14,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import Organization, OrganizationAgent, OrchestrationDecision, OrchestrationEvent, OrchestrationRun
+from .models import Organization, OrganizationAgent, OrganizationChapter, OrganizationSilo, OrchestrationDecision, OrchestrationEvent, OrchestrationRun
 from .queue import AgentRole, pick_agent_role
 from .schemas import DecisionCreate, OrchestrationRunCreate
 
@@ -429,9 +429,22 @@ def _load_org_config(db: Session, org_id: str | None) -> dict | None:
         .order_by(OrganizationAgent.sort_order)
         .all()
     )
+    silos = (
+        db.query(OrganizationSilo)
+        .filter(OrganizationSilo.org_id == org_id)
+        .order_by(OrganizationSilo.sort_order)
+        .all()
+    )
+    chapters = (
+        db.query(OrganizationChapter)
+        .filter(OrganizationChapter.org_id == org_id)
+        .order_by(OrganizationChapter.sort_order)
+        .all()
+    )
     return {
         "org_id": org.id,
         "org_name": org.name,
+        "pipeline_params": org.pipeline_params or {},
         "agents": [
             {
                 "agent_id": a.agent_id,
@@ -449,8 +462,27 @@ def _load_org_config(db: Session, org_id: str | None) -> dict | None:
                 "trust_map": a.trust_map,
                 "system_prompt_template": a.system_prompt_template,
                 "enabled": a.enabled,
+                "silo_id": a.silo_id,
+                "chapter_id": a.chapter_id,
+                "is_clevel": a.is_clevel,
+                "weight_score": a.weight_score,
             }
             for a in agents
+        ],
+        "silos": [
+            {"id": s.id, "name": s.name, "description": s.description}
+            for s in silos
+        ],
+        "chapters": [
+            {
+                "id": c.id,
+                "name": c.name,
+                "shared_directives": c.shared_directives,
+                "shared_constraints": c.shared_constraints,
+                "shared_decision_focus": c.shared_decision_focus,
+                "chapter_prompt": c.chapter_prompt,
+            }
+            for c in chapters
         ],
         "flat_mode_agents": org.flat_mode_agents or [],
         "agent_final_weights": org.agent_final_weights or {},

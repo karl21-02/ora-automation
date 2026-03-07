@@ -360,9 +360,32 @@ def generate_report(
     # 1. Load personas (org_config override or YAML default)
     # ------------------------------------------------------------------
     if org_config:
-        registry = PersonaRegistry.from_agent_dicts(org_config["agents"])
-        custom_flat_agents: set[str] = set(org_config.get("flat_mode_agents") or [])
-        custom_final_weights: dict[str, float] = org_config.get("agent_final_weights") or {}
+        if org_config.get("chapters"):
+            registry = PersonaRegistry.from_org_config(org_config)
+        else:
+            registry = PersonaRegistry.from_agent_dicts(org_config["agents"])
+
+        # flat_mode_agents: 명시적 값 우선, 없으면 enabled agents에서 자동 도출
+        explicit_flat = org_config.get("flat_mode_agents") or []
+        if explicit_flat:
+            custom_flat_agents: set[str] = set(explicit_flat)
+        else:
+            custom_flat_agents = {
+                a["agent_id"] for a in org_config["agents"]
+                if a.get("enabled", True)
+            }
+
+        # agent_final_weights: 명시적 값 우선, 없으면 weight_score에서 자동 도출
+        explicit_weights = org_config.get("agent_final_weights") or {}
+        if explicit_weights:
+            custom_final_weights: dict[str, float] = explicit_weights
+        else:
+            custom_final_weights = {
+                a["agent_id"]: a.get("weight_score", 1.0)
+                for a in org_config["agents"]
+                if a.get("enabled", True)
+            }
+
         resolved_persona_dir = None
         logger.info("Loaded %d personas from org_config", len(registry))
     else:

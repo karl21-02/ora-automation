@@ -100,6 +100,25 @@ def _parse_persona(data: dict[str, Any], source_path: Path | None = None) -> Age
 # PersonaRegistry
 # ---------------------------------------------------------------------------
 
+def _merge_chapter_into_agent(agent: dict[str, Any], chapter: dict[str, Any]) -> dict[str, Any]:
+    """Merge chapter shared knowledge into agent dict (copy, non-mutating)."""
+    merged = {**agent}
+    merged["behavioral_directives"] = (
+        (chapter.get("shared_directives") or []) + (agent.get("behavioral_directives") or [])
+    )
+    merged["constraints"] = (
+        (chapter.get("shared_constraints") or []) + (agent.get("constraints") or [])
+    )
+    merged["decision_focus"] = (
+        (chapter.get("shared_decision_focus") or []) + (agent.get("decision_focus") or [])
+    )
+    chapter_prompt = (chapter.get("chapter_prompt") or "").strip()
+    if chapter_prompt:
+        orig = (agent.get("system_prompt_template") or "").strip()
+        merged["system_prompt_template"] = chapter_prompt + "\n\n" + orig if orig else chapter_prompt
+    return merged
+
+
 class PersonaRegistry:
     """Registry that loads and provides access to agent personas from YAML files."""
 
@@ -137,6 +156,41 @@ class PersonaRegistry:
                 )
 
         logger.info("Created PersonaRegistry from %d agent dicts", len(registry._personas))
+        return registry
+
+    @classmethod
+    def from_org_config(cls, org_config: dict[str, Any]) -> "PersonaRegistry":
+        """Create registry from org_config with chapter prompt merging."""
+        chapter_map = {c["id"]: c for c in org_config.get("chapters", [])}
+
+        merged_agents: list[dict[str, Any]] = []
+        for agent in org_config.get("agents", []):
+            if not agent.get("enabled", True):
+                continue
+            chapter = chapter_map.get(agent.get("chapter_id"))
+            if chapter:
+                merged = _merge_chapter_into_agent(agent, chapter)
+            else:
+                merged = agent
+            merged_agents.append(merged)
+
+        registry = cls.__new__(cls)
+        registry._persona_dir = Path("/dev/null")
+        registry._personas = {}
+        registry._loaded = True
+        for agent_data in merged_agents:
+            if not agent_data.get("agent_id"):
+                continue
+            try:
+                persona = _parse_persona(agent_data)
+                registry._personas[persona.agent_id] = persona
+            except Exception:
+                logger.exception(
+                    "Failed to parse agent dict for %s",
+                    agent_data.get("agent_id", "unknown"),
+                )
+
+        logger.info("Created PersonaRegistry from org_config with %d personas", len(registry._personas))
         return registry
 
     # -- Loading --------------------------------------------------------
