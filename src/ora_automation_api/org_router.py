@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from .database import get_db
-from .models import Organization, OrganizationAgent
+from .models import Organization, OrganizationAgent, OrganizationChapter, OrganizationSilo
 from .schemas import (
     OrganizationCreate,
     OrganizationDetail,
@@ -17,6 +17,12 @@ from .schemas import (
     OrgAgentCreate,
     OrgAgentRead,
     OrgAgentUpdate,
+    OrgChapterCreate,
+    OrgChapterRead,
+    OrgChapterUpdate,
+    OrgSiloCreate,
+    OrgSiloRead,
+    OrgSiloUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,11 +79,14 @@ def create_org(
         teams=payload.teams,
         flat_mode_agents=payload.flat_mode_agents,
         agent_final_weights=payload.agent_final_weights,
+        pipeline_params=payload.pipeline_params,
     )
     db.add(org)
     db.commit()
     db.refresh(org)
-    return OrganizationDetail.model_validate({**OrganizationRead.model_validate(org).model_dump(), "agents": []})
+    return OrganizationDetail.model_validate(
+        {**OrganizationRead.model_validate(org).model_dump(), "agents": [], "silos": [], "chapters": []}
+    )
 
 
 @router.get("/{org_id}", response_model=OrganizationDetail)
@@ -89,9 +98,23 @@ def get_org(org_id: str, db: Session = Depends(get_db)) -> OrganizationDetail:
         .order_by(OrganizationAgent.sort_order, OrganizationAgent.agent_id)
         .all()
     )
+    silos = (
+        db.query(OrganizationSilo)
+        .filter(OrganizationSilo.org_id == org_id)
+        .order_by(OrganizationSilo.sort_order, OrganizationSilo.name)
+        .all()
+    )
+    chapters = (
+        db.query(OrganizationChapter)
+        .filter(OrganizationChapter.org_id == org_id)
+        .order_by(OrganizationChapter.sort_order, OrganizationChapter.name)
+        .all()
+    )
     return OrganizationDetail(
         **OrganizationRead.model_validate(org).model_dump(),
         agents=[OrgAgentRead.model_validate(a) for a in agents],
+        silos=[OrgSiloRead.model_validate(s) for s in silos],
+        chapters=[OrgChapterRead.model_validate(c) for c in chapters],
     )
 
 
@@ -144,10 +167,65 @@ def clone_org(
         teams=payload.teams or source.teams,
         flat_mode_agents=payload.flat_mode_agents or source.flat_mode_agents,
         agent_final_weights=payload.agent_final_weights or source.agent_final_weights,
+        pipeline_params=payload.pipeline_params or source.pipeline_params,
     )
     db.add(new_org)
     db.flush()
 
+    # Deep copy silos with ID mapping
+    silo_id_map: dict[str, str] = {}
+    source_silos = (
+        db.query(OrganizationSilo)
+        .filter(OrganizationSilo.org_id == org_id)
+        .order_by(OrganizationSilo.sort_order)
+        .all()
+    )
+    new_silos = []
+    for ss in source_silos:
+        new_id = uuid4().hex[:36]
+        silo_id_map[ss.id] = new_id
+        ns = OrganizationSilo(
+            id=new_id,
+            org_id=new_org.id,
+            name=ss.name,
+            description=ss.description,
+            color=ss.color,
+            sort_order=ss.sort_order,
+        )
+        db.add(ns)
+        new_silos.append(ns)
+
+    # Deep copy chapters with ID mapping
+    chapter_id_map: dict[str, str] = {}
+    source_chapters = (
+        db.query(OrganizationChapter)
+        .filter(OrganizationChapter.org_id == org_id)
+        .order_by(OrganizationChapter.sort_order)
+        .all()
+    )
+    new_chapters = []
+    for sc in source_chapters:
+        new_id = uuid4().hex[:36]
+        chapter_id_map[sc.id] = new_id
+        nc = OrganizationChapter(
+            id=new_id,
+            org_id=new_org.id,
+            name=sc.name,
+            description=sc.description,
+            shared_directives=sc.shared_directives,
+            shared_constraints=sc.shared_constraints,
+            shared_decision_focus=sc.shared_decision_focus,
+            chapter_prompt=sc.chapter_prompt,
+            color=sc.color,
+            icon=sc.icon,
+            sort_order=sc.sort_order,
+        )
+        db.add(nc)
+        new_chapters.append(nc)
+
+    db.flush()
+
+    # Deep copy agents with remapped silo_id / chapter_id
     source_agents = (
         db.query(OrganizationAgent)
         .filter(OrganizationAgent.org_id == org_id)
@@ -160,6 +238,10 @@ def clone_org(
             id=uuid4().hex[:36],
             org_id=new_org.id,
             agent_id=sa.agent_id,
+            silo_id=silo_id_map.get(sa.silo_id) if sa.silo_id else None,
+            chapter_id=chapter_id_map.get(sa.chapter_id) if sa.chapter_id else None,
+            is_clevel=sa.is_clevel,
+            weight_score=sa.weight_score,
             display_name=sa.display_name,
             display_name_ko=sa.display_name_ko,
             role=sa.role,
@@ -181,12 +263,18 @@ def clone_org(
 
     db.commit()
     db.refresh(new_org)
+    for ns in new_silos:
+        db.refresh(ns)
+    for nc in new_chapters:
+        db.refresh(nc)
     for na in new_agents:
         db.refresh(na)
 
     return OrganizationDetail(
         **OrganizationRead.model_validate(new_org).model_dump(),
         agents=[OrgAgentRead.model_validate(a) for a in new_agents],
+        silos=[OrgSiloRead.model_validate(s) for s in new_silos],
+        chapters=[OrgChapterRead.model_validate(c) for c in new_chapters],
     )
 
 
@@ -249,4 +337,178 @@ def delete_agent(
         raise HTTPException(status_code=403, detail="preset organizations cannot be modified")
     agent = _get_agent(db, org_id, agent_id)
     db.delete(agent)
+    db.commit()
+
+
+# ── Silo CRUD ─────────────────────────────────────────────────────
+
+
+@router.post("/{org_id}/silos", response_model=OrgSiloRead, status_code=201)
+def create_silo(
+    org_id: str,
+    payload: OrgSiloCreate,
+    db: Session = Depends(get_db),
+) -> OrgSiloRead:
+    org = _get_org(db, org_id)
+    if org.is_preset:
+        raise HTTPException(status_code=403, detail="preset organizations cannot be modified")
+    existing = (
+        db.query(OrganizationSilo)
+        .filter(OrganizationSilo.org_id == org_id, OrganizationSilo.name == payload.name)
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="silo name already exists in this organization")
+    silo = OrganizationSilo(
+        id=uuid4().hex[:36],
+        org_id=org_id,
+        **payload.model_dump(),
+    )
+    db.add(silo)
+    db.commit()
+    db.refresh(silo)
+    return OrgSiloRead.model_validate(silo)
+
+
+@router.patch("/{org_id}/silos/{silo_id}", response_model=OrgSiloRead)
+def update_silo(
+    org_id: str,
+    silo_id: str,
+    payload: OrgSiloUpdate,
+    db: Session = Depends(get_db),
+) -> OrgSiloRead:
+    org = _get_org(db, org_id)
+    if org.is_preset:
+        raise HTTPException(status_code=403, detail="preset organizations cannot be modified")
+    silo = (
+        db.query(OrganizationSilo)
+        .filter(OrganizationSilo.org_id == org_id, OrganizationSilo.id == silo_id)
+        .first()
+    )
+    if not silo:
+        raise HTTPException(status_code=404, detail="silo not found")
+    update_data = payload.model_dump(exclude_unset=True)
+    if "name" in update_data:
+        dup = (
+            db.query(OrganizationSilo)
+            .filter(
+                OrganizationSilo.org_id == org_id,
+                OrganizationSilo.name == update_data["name"],
+                OrganizationSilo.id != silo_id,
+            )
+            .first()
+        )
+        if dup:
+            raise HTTPException(status_code=409, detail="silo name already exists in this organization")
+    for key, value in update_data.items():
+        setattr(silo, key, value)
+    db.commit()
+    db.refresh(silo)
+    return OrgSiloRead.model_validate(silo)
+
+
+@router.delete("/{org_id}/silos/{silo_id}", status_code=204)
+def delete_silo(
+    org_id: str,
+    silo_id: str,
+    db: Session = Depends(get_db),
+) -> None:
+    org = _get_org(db, org_id)
+    if org.is_preset:
+        raise HTTPException(status_code=403, detail="preset organizations cannot be modified")
+    silo = (
+        db.query(OrganizationSilo)
+        .filter(OrganizationSilo.org_id == org_id, OrganizationSilo.id == silo_id)
+        .first()
+    )
+    if not silo:
+        raise HTTPException(status_code=404, detail="silo not found")
+    db.delete(silo)
+    db.commit()
+
+
+# ── Chapter CRUD ──────────────────────────────────────────────────
+
+
+@router.post("/{org_id}/chapters", response_model=OrgChapterRead, status_code=201)
+def create_chapter(
+    org_id: str,
+    payload: OrgChapterCreate,
+    db: Session = Depends(get_db),
+) -> OrgChapterRead:
+    org = _get_org(db, org_id)
+    if org.is_preset:
+        raise HTTPException(status_code=403, detail="preset organizations cannot be modified")
+    existing = (
+        db.query(OrganizationChapter)
+        .filter(OrganizationChapter.org_id == org_id, OrganizationChapter.name == payload.name)
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="chapter name already exists in this organization")
+    chapter = OrganizationChapter(
+        id=uuid4().hex[:36],
+        org_id=org_id,
+        **payload.model_dump(),
+    )
+    db.add(chapter)
+    db.commit()
+    db.refresh(chapter)
+    return OrgChapterRead.model_validate(chapter)
+
+
+@router.patch("/{org_id}/chapters/{chapter_id}", response_model=OrgChapterRead)
+def update_chapter(
+    org_id: str,
+    chapter_id: str,
+    payload: OrgChapterUpdate,
+    db: Session = Depends(get_db),
+) -> OrgChapterRead:
+    org = _get_org(db, org_id)
+    if org.is_preset:
+        raise HTTPException(status_code=403, detail="preset organizations cannot be modified")
+    chapter = (
+        db.query(OrganizationChapter)
+        .filter(OrganizationChapter.org_id == org_id, OrganizationChapter.id == chapter_id)
+        .first()
+    )
+    if not chapter:
+        raise HTTPException(status_code=404, detail="chapter not found")
+    update_data = payload.model_dump(exclude_unset=True)
+    if "name" in update_data:
+        dup = (
+            db.query(OrganizationChapter)
+            .filter(
+                OrganizationChapter.org_id == org_id,
+                OrganizationChapter.name == update_data["name"],
+                OrganizationChapter.id != chapter_id,
+            )
+            .first()
+        )
+        if dup:
+            raise HTTPException(status_code=409, detail="chapter name already exists in this organization")
+    for key, value in update_data.items():
+        setattr(chapter, key, value)
+    db.commit()
+    db.refresh(chapter)
+    return OrgChapterRead.model_validate(chapter)
+
+
+@router.delete("/{org_id}/chapters/{chapter_id}", status_code=204)
+def delete_chapter(
+    org_id: str,
+    chapter_id: str,
+    db: Session = Depends(get_db),
+) -> None:
+    org = _get_org(db, org_id)
+    if org.is_preset:
+        raise HTTPException(status_code=403, detail="preset organizations cannot be modified")
+    chapter = (
+        db.query(OrganizationChapter)
+        .filter(OrganizationChapter.org_id == org_id, OrganizationChapter.id == chapter_id)
+        .first()
+    )
+    if not chapter:
+        raise HTTPException(status_code=404, detail="chapter not found")
+    db.delete(chapter)
     db.commit()

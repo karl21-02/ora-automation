@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -165,6 +165,62 @@ class Organization(Base):
     teams: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     flat_mode_agents: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     agent_final_weights: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    pipeline_params: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class OrganizationSilo(Base):
+    __tablename__ = "organization_silos"
+    __table_args__ = (
+        UniqueConstraint("org_id", "name", name="uq_org_silo_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    org_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#3b82f6")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class OrganizationChapter(Base):
+    __tablename__ = "organization_chapters"
+    __table_args__ = (
+        UniqueConstraint("org_id", "name", name="uq_org_chapter_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    org_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    shared_directives: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    shared_constraints: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    shared_decision_focus: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    chapter_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#8b5cf6")
+    icon: Mapped[str] = mapped_column(String(4), nullable=False, default="📁")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -187,6 +243,20 @@ class OrganizationAgent(Base):
         index=True,
     )
     agent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    silo_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("organization_silos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    chapter_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("organization_chapters.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    is_clevel: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    weight_score: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     display_name: Mapped[str] = mapped_column(String(128), nullable=False)
     display_name_ko: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="")

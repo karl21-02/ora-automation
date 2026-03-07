@@ -322,6 +322,10 @@ class OrgAgentCreate(BaseModel):
     tier: int = Field(default=1, ge=1, le=4)
     domain: str | None = Field(default=None, max_length=64)
     team: str = Field(default="", max_length=64)
+    silo_id: str | None = Field(default=None, max_length=36)
+    chapter_id: str | None = Field(default=None, max_length=36)
+    is_clevel: bool = False
+    weight_score: float = Field(default=1.0, ge=0.0, le=10.0)
     personality: dict = Field(default_factory=dict)
     behavioral_directives: list = Field(default_factory=list)
     constraints: list = Field(default_factory=list)
@@ -340,6 +344,10 @@ class OrgAgentUpdate(BaseModel):
     tier: int | None = Field(default=None, ge=1, le=4)
     domain: str | None = None
     team: str | None = Field(default=None, max_length=64)
+    silo_id: str | None = None
+    chapter_id: str | None = None
+    is_clevel: bool | None = None
+    weight_score: float | None = Field(default=None, ge=0.0, le=10.0)
     personality: dict | None = None
     behavioral_directives: list | None = None
     constraints: list | None = None
@@ -357,6 +365,10 @@ class OrgAgentRead(BaseModel):
     id: str
     org_id: str
     agent_id: str
+    silo_id: str | None = None
+    chapter_id: str | None = None
+    is_clevel: bool
+    weight_score: float
     display_name: str
     display_name_ko: str
     role: str
@@ -382,6 +394,7 @@ class OrganizationCreate(BaseModel):
     teams: dict = Field(default_factory=dict)
     flat_mode_agents: list[str] = Field(default_factory=list)
     agent_final_weights: dict[str, float] = Field(default_factory=dict)
+    pipeline_params: dict = Field(default_factory=dict)
 
 
 class OrganizationUpdate(BaseModel):
@@ -390,6 +403,7 @@ class OrganizationUpdate(BaseModel):
     teams: dict | None = None
     flat_mode_agents: list[str] | None = None
     agent_final_weights: dict[str, float] | None = None
+    pipeline_params: dict | None = None
 
 
 class OrganizationRead(BaseModel):
@@ -402,14 +416,89 @@ class OrganizationRead(BaseModel):
     teams: dict
     flat_mode_agents: list
     agent_final_weights: dict
+    pipeline_params: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
 
 class OrganizationDetail(OrganizationRead):
     agents: list[OrgAgentRead] = Field(default_factory=list)
+    silos: list["OrgSiloRead"] = Field(default_factory=list)
+    chapters: list["OrgChapterRead"] = Field(default_factory=list)
 
 
 class OrganizationList(BaseModel):
     items: list[OrganizationRead]
     total: int
+
+
+# ── Silos & Chapters ─────────────────────────────────────────────
+
+
+class OrgSiloCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = None
+    color: str = Field(default="#3b82f6", max_length=7)
+    sort_order: int = 0
+
+
+class OrgSiloUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    description: str | None = None
+    color: str | None = Field(default=None, max_length=7)
+    sort_order: int | None = None
+
+
+class OrgSiloRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    org_id: str
+    name: str
+    description: str | None
+    color: str
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class OrgChapterCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = None
+    shared_directives: list = Field(default_factory=list)
+    shared_constraints: list = Field(default_factory=list)
+    shared_decision_focus: list = Field(default_factory=list)
+    chapter_prompt: str = ""
+    color: str = Field(default="#8b5cf6", max_length=7)
+    icon: str = Field(default="📁", max_length=4)
+    sort_order: int = 0
+
+
+class OrgChapterUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    description: str | None = None
+    shared_directives: list | None = None
+    shared_constraints: list | None = None
+    shared_decision_focus: list | None = None
+    chapter_prompt: str | None = None
+    color: str | None = Field(default=None, max_length=7)
+    icon: str | None = Field(default=None, max_length=4)
+    sort_order: int | None = None
+
+
+class OrgChapterRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    org_id: str
+    name: str
+    description: str | None
+    shared_directives: list
+    shared_constraints: list
+    shared_decision_focus: list
+    chapter_prompt: str
+    color: str
+    icon: str
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime

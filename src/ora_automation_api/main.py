@@ -134,6 +134,39 @@ def _run_ddl_migrations() -> None:
             UNIQUE(org_id, agent_id)
         )""",
         "ALTER TABLE orchestration_runs ADD COLUMN IF NOT EXISTS org_id VARCHAR(36)",
+        # Organization silos & chapters
+        """CREATE TABLE IF NOT EXISTS organization_silos (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            name VARCHAR(128) NOT NULL,
+            description TEXT,
+            color VARCHAR(7) NOT NULL DEFAULT '#3b82f6',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(org_id, name)
+        )""",
+        """CREATE TABLE IF NOT EXISTS organization_chapters (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            name VARCHAR(128) NOT NULL,
+            description TEXT,
+            shared_directives JSONB NOT NULL DEFAULT '[]'::jsonb,
+            shared_constraints JSONB NOT NULL DEFAULT '[]'::jsonb,
+            shared_decision_focus JSONB NOT NULL DEFAULT '[]'::jsonb,
+            chapter_prompt TEXT NOT NULL DEFAULT '',
+            color VARCHAR(7) NOT NULL DEFAULT '#8b5cf6',
+            icon VARCHAR(4) NOT NULL DEFAULT '📁',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(org_id, name)
+        )""",
+        "ALTER TABLE organization_agents ADD COLUMN IF NOT EXISTS silo_id VARCHAR(36)",
+        "ALTER TABLE organization_agents ADD COLUMN IF NOT EXISTS chapter_id VARCHAR(36)",
+        "ALTER TABLE organization_agents ADD COLUMN IF NOT EXISTS is_clevel BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE organization_agents ADD COLUMN IF NOT EXISTS weight_score DOUBLE PRECISION NOT NULL DEFAULT 1.0",
+        "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS pipeline_params JSONB NOT NULL DEFAULT '{}'::jsonb",
         # Scheduled jobs
         """CREATE TABLE IF NOT EXISTS scheduled_jobs (
             id VARCHAR(36) PRIMARY KEY,
