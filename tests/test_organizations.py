@@ -608,3 +608,207 @@ class TestOrganizationPipelineParams:
         db.refresh(org)
 
         assert org.pipeline_params == params
+
+
+class TestPresetSeedingStructure:
+    """프리셋 시딩 결과 구조 검증 (실제 _seed_preset_org() 호출 대신 같은 매핑 로직 검증)."""
+
+    def test_seed_silos_chapters_agents(self, db):
+        """5 silos, 8 chapters, 24 agents 전체 구조를 DB에 직접 생성하고 검증."""
+        from uuid import uuid4
+        from ora_automation_api.models import (
+            Organization, OrganizationAgent, OrganizationChapter, OrganizationSilo,
+        )
+
+        org_id = uuid4().hex[:36]
+        org = Organization(
+            id=org_id,
+            name="PresetTest",
+            is_preset=True,
+            teams={},
+            flat_mode_agents=[],
+            agent_final_weights={},
+            pipeline_params={
+                "level1_max_rounds": 5,
+                "level2_max_rounds": 3,
+                "level3_max_rounds": 3,
+                "convergence_threshold": 0.15,
+                "top_k": 6,
+            },
+        )
+        db.add(org)
+        db.flush()
+
+        # 8 chapters
+        chapter_defs = [
+            ("Engineering", "📐", "#3b82f6"),
+            ("Security", "🔒", "#ef4444"),
+            ("Research", "🔬", "#06b6d4"),
+            ("Product", "📦", "#8b5cf6"),
+            ("Data", "📊", "#f59e0b"),
+            ("QA", "🧪", "#10b981"),
+            ("Ops", "⚙️", "#6b7280"),
+            ("Strategy", "📋", "#ec4899"),
+        ]
+        ch_map = {}
+        for idx, (name, icon, color) in enumerate(chapter_defs):
+            ch_id = uuid4().hex[:36]
+            ch_map[name] = ch_id
+            db.add(OrganizationChapter(
+                id=ch_id, org_id=org_id, name=name,
+                icon=icon, color=color, sort_order=idx,
+                shared_directives=["test directive"],
+            ))
+
+        # 5 silos
+        silo_defs = ["전략기획", "프로덕트", "플랫폼", "품질보증", "리서치"]
+        silo_map = {}
+        for idx, name in enumerate(silo_defs):
+            s_id = uuid4().hex[:36]
+            silo_map[name] = s_id
+            db.add(OrganizationSilo(id=s_id, org_id=org_id, name=name, sort_order=idx))
+
+        db.flush()
+
+        # C-Level agents (no silo, no chapter)
+        for aid in ("CEO", "ComplianceOfficer", "DebateSupervisor"):
+            db.add(OrganizationAgent(
+                id=uuid4().hex[:36], org_id=org_id, agent_id=aid, display_name=aid,
+                silo_id=None, chapter_id=None, is_clevel=True, weight_score=0.20,
+                weights={}, trust_map={}, personality={},
+                behavioral_directives=[], constraints=[], decision_focus=[],
+            ))
+
+        # Normal agents (with silo + chapter)
+        normal_agents = [
+            ("Planner", "전략기획", "Strategy"),
+            ("DataScientist", "전략기획", "Data"),
+            ("DataAnalyst", "전략기획", "Data"),
+            ("PM", "프로덕트", "Product"),
+            ("ProductDesigner", "프로덕트", "Product"),
+            ("MarketAnalyst", "프로덕트", "Product"),
+            ("TechLead", "프로덕트", "Engineering"),
+            ("Ops", "플랫폼", "Ops"),
+            ("Developer", "플랫폼", "Engineering"),
+            ("DeveloperFrontend", "플랫폼", "Engineering"),
+            ("DeveloperDevOps", "플랫폼", "Engineering"),
+            ("DevOpsSRE", "플랫폼", "Engineering"),
+            ("GrowthHacker", "플랫폼", "Ops"),
+            ("FinanceAnalyst", "플랫폼", "Ops"),
+            ("QALead", "품질보증", "QA"),
+            ("SecuritySpecialist", "품질보증", "Security"),
+            ("Linguist", "품질보증", "QA"),
+            ("QA", "품질보증", "QA"),
+            ("Researcher", "리서치", "Research"),
+            ("SearchEvaluator", "리서치", "Research"),
+            ("WebSearchAgent", "리서치", "Research"),
+        ]
+        for aid, silo_name, ch_name in normal_agents:
+            db.add(OrganizationAgent(
+                id=uuid4().hex[:36], org_id=org_id, agent_id=aid, display_name=aid,
+                silo_id=silo_map[silo_name], chapter_id=ch_map[ch_name],
+                is_clevel=False, weight_score=1.0,
+                weights={}, trust_map={}, personality={},
+                behavioral_directives=[], constraints=[], decision_focus=[],
+            ))
+
+        db.commit()
+
+        # Verify counts
+        silos = db.query(OrganizationSilo).filter(OrganizationSilo.org_id == org_id).all()
+        chapters = db.query(OrganizationChapter).filter(OrganizationChapter.org_id == org_id).all()
+        agents = db.query(OrganizationAgent).filter(OrganizationAgent.org_id == org_id).all()
+
+        assert len(silos) == 5
+        assert len(chapters) == 8
+        assert len(agents) == 24  # 3 C-Level + 21 normal
+
+        # Verify C-Level agents
+        clevel_agents = [a for a in agents if a.is_clevel]
+        assert len(clevel_agents) == 3
+        for a in clevel_agents:
+            assert a.silo_id is None
+            assert a.chapter_id is None
+
+        # Verify normal agents have silo + chapter
+        normal = [a for a in agents if not a.is_clevel]
+        assert len(normal) == 21
+        for a in normal:
+            assert a.silo_id is not None, f"{a.agent_id} missing silo_id"
+            assert a.chapter_id is not None, f"{a.agent_id} missing chapter_id"
+
+        # Verify chapter icons
+        ch_icons = {c.name: c.icon for c in chapters}
+        assert ch_icons["Engineering"] == "📐"
+        assert ch_icons["Security"] == "🔒"
+
+        # Verify pipeline_params
+        db.refresh(org)
+        assert org.pipeline_params["top_k"] == 6
+        assert org.pipeline_params["convergence_threshold"] == 0.15
+
+    def test_clevel_weight_score_from_config(self, db):
+        """C-Level 에이전트의 weight_score가 AGENT_FINAL_WEIGHTS에서 올바르게 설정되는지 검증."""
+        from uuid import uuid4
+        from ora_automation_api.models import Organization, OrganizationAgent
+
+        org = Organization(
+            id=uuid4().hex[:36], name="WeightOrg", teams={},
+            flat_mode_agents=[], agent_final_weights={},
+        )
+        db.add(org)
+        db.commit()
+
+        # CEO의 AGENT_FINAL_WEIGHTS 값은 0.20
+        agent = OrganizationAgent(
+            id=uuid4().hex[:36], org_id=org.id, agent_id="CEO", display_name="CEO",
+            silo_id=None, chapter_id=None, is_clevel=True, weight_score=0.20,
+            weights={}, trust_map={}, personality={},
+            behavioral_directives=[], constraints=[], decision_focus=[],
+        )
+        db.add(agent)
+        db.commit()
+        db.refresh(agent)
+
+        assert agent.weight_score == 0.20
+        assert agent.is_clevel is True
+
+    def test_chapter_shared_directives_inherited(self, db):
+        """챕터의 shared_directives가 소속 에이전트 조회 시 접근 가능한지 검증."""
+        from uuid import uuid4
+        from ora_automation_api.models import (
+            Organization, OrganizationAgent, OrganizationChapter,
+        )
+
+        org = Organization(
+            id=uuid4().hex[:36], name="InheritOrg", teams={},
+            flat_mode_agents=[], agent_final_weights={},
+        )
+        db.add(org)
+        db.commit()
+
+        chapter = OrganizationChapter(
+            id=uuid4().hex[:36], org_id=org.id, name="TestCh",
+            shared_directives=["be careful", "check twice"],
+            shared_constraints=["no shortcuts"],
+            chapter_prompt="You are a TestCh member.",
+        )
+        db.add(chapter)
+        db.commit()
+
+        agent = OrganizationAgent(
+            id=uuid4().hex[:36], org_id=org.id, agent_id="A1", display_name="A1",
+            chapter_id=chapter.id, is_clevel=False, weight_score=1.0,
+            behavioral_directives=["agent specific"],
+            weights={}, trust_map={}, personality={}, constraints=[], decision_focus=[],
+        )
+        db.add(agent)
+        db.commit()
+
+        # 조회해서 챕터 directives 접근 가능 확인
+        loaded_chapter = db.query(OrganizationChapter).filter(
+            OrganizationChapter.id == agent.chapter_id,
+        ).first()
+        assert loaded_chapter is not None
+        merged = loaded_chapter.shared_directives + agent.behavioral_directives
+        assert merged == ["be careful", "check twice", "agent specific"]

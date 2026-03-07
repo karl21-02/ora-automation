@@ -192,13 +192,19 @@ def _run_ddl_migrations() -> None:
 
 
 def _seed_preset_org() -> None:
-    """Seed the default preset organization from YAML persona files (idempotent)."""
+    """Seed the default preset organization from YAML persona files (idempotent).
+
+    Creates the Toss-style silo+chapter structure:
+    - 5 silos (mission teams)
+    - 8 chapters (expertise groups with shared directives)
+    - 24 agents (mapped to silo + chapter; C-Level agents have neither)
+    """
     import logging
 
     _logger = logging.getLogger(__name__)
     db = SessionLocal()
     try:
-        from .models import Organization, OrganizationAgent
+        from .models import Organization, OrganizationAgent, OrganizationChapter, OrganizationSilo
 
         PRESET_NAME = "Default (Toss Silo)"
         existing = db.query(Organization).filter(Organization.name == PRESET_NAME).first()
@@ -229,9 +235,251 @@ def _seed_preset_org() -> None:
             teams={},
             flat_mode_agents=sorted(FLAT_MODE_AGENTS),
             agent_final_weights=AGENT_FINAL_WEIGHTS,
+            pipeline_params={
+                "level1_max_rounds": 5,
+                "level2_max_rounds": 3,
+                "level3_max_rounds": 3,
+                "convergence_threshold": 0.15,
+                "top_k": 6,
+                "orchestration_profile": "standard",
+            },
         )
         db.add(org)
         db.flush()
+
+        # ── Chapters (전문가 그룹 — 공유 지식 레이어) ──────────
+        PRESET_CHAPTERS = [
+            {
+                "name": "Engineering",
+                "description": "소프트웨어 엔지니어링 전문가 그룹",
+                "icon": "📐",
+                "color": "#3b82f6",
+                "shared_directives": [
+                    "구현 복잡도와 유지보수 비용을 항상 고려하라",
+                    "기술 부채 관점에서 평가하라",
+                ],
+                "shared_constraints": [
+                    "검증되지 않은 기술 스택 추천 시 반드시 리스크 명시",
+                ],
+                "shared_decision_focus": ["feasibility", "risk_penalty"],
+                "chapter_prompt": (
+                    "당신은 Engineering 챕터 소속입니다. "
+                    "같은 챕터의 동료들과 기술적 관점을 공유합니다. "
+                    "기술 구현 가능성과 운영 안정성을 최우선으로 평가하세요."
+                ),
+            },
+            {
+                "name": "Security",
+                "description": "보안 전문가 그룹",
+                "icon": "🔒",
+                "color": "#ef4444",
+                "shared_directives": [
+                    "OWASP Top 10 기준으로 보안 위협을 평가하라",
+                    "보안 취약점 발견 시 즉시 경고하라",
+                ],
+                "shared_constraints": [
+                    "보안 위험이 높은 전략에는 반드시 완화 방안을 제시",
+                ],
+                "shared_decision_focus": ["risk_penalty", "feasibility"],
+                "chapter_prompt": (
+                    "당신은 Security 챕터 소속입니다. "
+                    "보안 위협과 취약점 관점에서 모든 전략을 평가하세요."
+                ),
+            },
+            {
+                "name": "Research",
+                "description": "연구/학술 전문가 그룹",
+                "icon": "🔬",
+                "color": "#06b6d4",
+                "shared_directives": [
+                    "최신 논문과 학술 근거를 필수 참조하라",
+                    "연구 동향과 기술 트렌드를 반영하라",
+                ],
+                "shared_constraints": [],
+                "shared_decision_focus": ["novelty", "impact"],
+                "chapter_prompt": (
+                    "당신은 Research 챕터 소속입니다. "
+                    "학술적 근거와 최신 연구 동향을 기반으로 평가하세요."
+                ),
+            },
+            {
+                "name": "Product",
+                "description": "프로덕트/비즈니스 전문가 그룹",
+                "icon": "📦",
+                "color": "#8b5cf6",
+                "shared_directives": [
+                    "시장 수요와 사용자 경험을 최우선 고려하라",
+                    "비즈니스 임팩트를 정량적으로 평가하라",
+                ],
+                "shared_constraints": [],
+                "shared_decision_focus": ["impact", "novelty"],
+                "chapter_prompt": (
+                    "당신은 Product 챕터 소속입니다. "
+                    "시장 수요, UX, 비즈니스 임팩트 관점에서 평가하세요."
+                ),
+            },
+            {
+                "name": "Data",
+                "description": "데이터 분석 전문가 그룹",
+                "icon": "📊",
+                "color": "#f59e0b",
+                "shared_directives": [
+                    "데이터 기반 판단과 정량적 근거를 제시하라",
+                    "통계적 유의성을 항상 검증하라",
+                ],
+                "shared_constraints": [],
+                "shared_decision_focus": ["impact", "feasibility"],
+                "chapter_prompt": (
+                    "당신은 Data 챕터 소속입니다. "
+                    "데이터 기반 판단과 정량적 근거를 최우선으로 제시하세요."
+                ),
+            },
+            {
+                "name": "QA",
+                "description": "품질 보증 전문가 그룹",
+                "icon": "🧪",
+                "color": "#10b981",
+                "shared_directives": [
+                    "품질 게이트와 테스트 커버리지를 확인하라",
+                    "회귀 리스크를 평가하라",
+                ],
+                "shared_constraints": [],
+                "shared_decision_focus": ["feasibility", "risk_penalty"],
+                "chapter_prompt": (
+                    "당신은 QA 챕터 소속입니다. "
+                    "품질 보증과 테스트 관점에서 전략을 평가하세요."
+                ),
+            },
+            {
+                "name": "Ops",
+                "description": "운영/인프라 전문가 그룹",
+                "icon": "⚙️",
+                "color": "#6b7280",
+                "shared_directives": [
+                    "운영 안정성과 비용 효율을 최우선 고려하라",
+                    "SLA와 장애 대응 관점에서 평가하라",
+                ],
+                "shared_constraints": [],
+                "shared_decision_focus": ["feasibility", "risk_penalty"],
+                "chapter_prompt": (
+                    "당신은 Ops 챕터 소속입니다. "
+                    "운영 안정성, 비용 효율, 장애 대응 관점에서 평가하세요."
+                ),
+            },
+            {
+                "name": "Strategy",
+                "description": "전략 기획 전문가 그룹",
+                "icon": "📋",
+                "color": "#ec4899",
+                "shared_directives": [
+                    "중장기 전략과 로드맵 정합성을 검증하라",
+                    "시장 포지셔닝과 경쟁 우위를 분석하라",
+                ],
+                "shared_constraints": [],
+                "shared_decision_focus": ["impact", "novelty"],
+                "chapter_prompt": (
+                    "당신은 Strategy 챕터 소속입니다. "
+                    "중장기 전략, 로드맵 정합성, 시장 포지셔닝 관점에서 평가하세요."
+                ),
+            },
+        ]
+
+        chapter_name_to_id: dict[str, str] = {}
+        for idx, ch_def in enumerate(PRESET_CHAPTERS):
+            ch_id = uuid4().hex[:36]
+            chapter_name_to_id[ch_def["name"]] = ch_id
+            chapter = OrganizationChapter(
+                id=ch_id,
+                org_id=org_id,
+                name=ch_def["name"],
+                description=ch_def["description"],
+                shared_directives=ch_def["shared_directives"],
+                shared_constraints=ch_def["shared_constraints"],
+                shared_decision_focus=ch_def["shared_decision_focus"],
+                chapter_prompt=ch_def["chapter_prompt"],
+                color=ch_def["color"],
+                icon=ch_def["icon"],
+                sort_order=idx,
+            )
+            db.add(chapter)
+
+        # ── Silos (미션 팀 — 에이전트가 배치되어 일하는 곳) ────
+        PRESET_SILOS = [
+            {"name": "전략기획", "description": "중장기 전략 기획 및 리서치 분석", "color": "#ec4899"},
+            {"name": "프로덕트", "description": "프로덕트 기획, 디자인, 시장 분석", "color": "#8b5cf6"},
+            {"name": "플랫폼", "description": "플랫폼 개발, 인프라, 운영", "color": "#3b82f6"},
+            {"name": "품질보증", "description": "QA, 보안, 언어 품질 검증", "color": "#10b981"},
+            {"name": "리서치", "description": "학술 연구, 기술 트렌드 분석", "color": "#06b6d4"},
+        ]
+
+        silo_name_to_id: dict[str, str] = {}
+        for idx, silo_def in enumerate(PRESET_SILOS):
+            silo_id = uuid4().hex[:36]
+            silo_name_to_id[silo_def["name"]] = silo_id
+            silo = OrganizationSilo(
+                id=silo_id,
+                org_id=org_id,
+                name=silo_def["name"],
+                description=silo_def["description"],
+                color=silo_def["color"],
+                sort_order=idx,
+            )
+            db.add(silo)
+
+        db.flush()
+
+        # ── Agent → Silo / Chapter 매핑 ────────────────────────
+        # C-Level: silo=None, chapter=None, is_clevel=True
+        # 나머지: YAML team → silo, agent_id → chapter
+        CLEVEL_AGENTS = {"CEO", "ComplianceOfficer", "DebateSupervisor"}
+
+        # YAML team field → silo name 매핑
+        TEAM_TO_SILO = {
+            "research_intelligence": "전략기획",
+            "product_realization": "프로덕트",
+            "platform_infrastructure": "플랫폼",
+            "quality_assurance": "품질보증",
+        }
+
+        # agent_id → chapter name 매핑
+        AGENT_TO_CHAPTER = {
+            # Engineering
+            "Developer": "Engineering",
+            "DeveloperFrontend": "Engineering",
+            "DevOpsSRE": "Engineering",
+            "DeveloperDevOps": "Engineering",
+            "TechLead": "Engineering",
+            # Security
+            "SecuritySpecialist": "Security",
+            # Research
+            "Researcher": "Research",
+            "SearchEvaluator": "Research",
+            "WebSearchAgent": "Research",
+            # Product
+            "PM": "Product",
+            "ProductDesigner": "Product",
+            "MarketAnalyst": "Product",
+            # Data
+            "DataAnalyst": "Data",
+            "DataScientist": "Data",
+            # QA
+            "QALead": "QA",
+            "QA": "QA",
+            "Linguist": "QA",
+            # Ops
+            "Ops": "Ops",
+            "FinanceAnalyst": "Ops",
+            "GrowthHacker": "Ops",
+            # Strategy
+            "Planner": "Strategy",
+        }
+
+        # Researcher → 리서치 사일로 (team=research_intelligence이지만 사일로는 리서치)
+        AGENT_SILO_OVERRIDE = {
+            "Researcher": "리서치",
+            "SearchEvaluator": "리서치",
+            "WebSearchAgent": "리서치",
+        }
 
         teams_set: dict[str, list[str]] = {}
         yaml_files = sorted(persona_dir.glob("*.yaml")) + sorted(persona_dir.glob("*.yml"))
@@ -244,10 +492,36 @@ def _seed_preset_org() -> None:
                 team = data.get("team", "")
                 if team:
                     teams_set.setdefault(team, []).append(agent_id)
+
+                is_clevel = agent_id in CLEVEL_AGENTS
+
+                # Silo 결정
+                if is_clevel:
+                    resolved_silo_id = None
+                elif agent_id in AGENT_SILO_OVERRIDE:
+                    resolved_silo_id = silo_name_to_id.get(AGENT_SILO_OVERRIDE[agent_id])
+                else:
+                    silo_name = TEAM_TO_SILO.get(team)
+                    resolved_silo_id = silo_name_to_id.get(silo_name) if silo_name else None
+
+                # Chapter 결정
+                if is_clevel:
+                    resolved_chapter_id = None
+                else:
+                    chapter_name = AGENT_TO_CHAPTER.get(agent_id)
+                    resolved_chapter_id = chapter_name_to_id.get(chapter_name) if chapter_name else None
+
+                # weight_score 결정
+                weight_score = AGENT_FINAL_WEIGHTS.get(agent_id, 1.0)
+
                 agent = OrganizationAgent(
                     id=uuid4().hex[:36],
                     org_id=org_id,
                     agent_id=agent_id,
+                    silo_id=resolved_silo_id,
+                    chapter_id=resolved_chapter_id,
+                    is_clevel=is_clevel,
+                    weight_score=weight_score,
                     display_name=data.get("display_name", agent_id),
                     display_name_ko=data.get("display_name_ko", data.get("display_name", agent_id)),
                     role=data.get("role", ""),
@@ -270,7 +544,10 @@ def _seed_preset_org() -> None:
 
         org.teams = teams_set
         db.commit()
-        _logger.info("Seeded preset org '%s' with agents from %d YAML files", PRESET_NAME, len(yaml_files))
+        _logger.info(
+            "Seeded preset org '%s' with %d silos, %d chapters, agents from %d YAML files",
+            PRESET_NAME, len(PRESET_SILOS), len(PRESET_CHAPTERS), len(yaml_files),
+        )
     except Exception:
         _logger.exception("Failed to seed preset organization")
         db.rollback()
