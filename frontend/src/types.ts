@@ -51,6 +51,7 @@ export interface OrchestrationRun {
   current_stage: string | null
   pause_requested: boolean
   cancel_requested: boolean
+  pipeline_stages: string[] | null
   exit_code: number | null
   error_message: string | null
   created_at: string
