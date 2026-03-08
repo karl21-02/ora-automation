@@ -333,9 +333,15 @@ class ScheduledJobRead(BaseModel):
 
 
 class OrgAgentCreate(BaseModel):
-    agent_id: str = Field(..., min_length=1, max_length=64)
+    agent_id: str = Field(
+        ...,
+        min_length=3,
+        max_length=64,
+        pattern=r"^[A-Za-z][A-Za-z0-9_]*$",
+        description="Unique agent identifier: letters, digits, underscore. Must start with letter.",
+    )
     display_name: str = Field(..., min_length=1, max_length=128)
-    display_name_ko: str = Field(default="", max_length=128)
+    display_name_ko: str = Field(default="", max_length=256)
     role: str = Field(default="", max_length=32)
     tier: int = Field(default=1, ge=1, le=4)
     domain: str | None = Field(default=None, max_length=64)
@@ -350,14 +356,14 @@ class OrgAgentCreate(BaseModel):
     decision_focus: list = Field(default_factory=list)
     weights: dict = Field(default_factory=dict)
     trust_map: dict = Field(default_factory=dict)
-    system_prompt_template: str | None = None
+    system_prompt_template: str = Field(default="", max_length=4000)
     enabled: bool = True
     sort_order: int = 0
 
 
 class OrgAgentUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=128)
-    display_name_ko: str | None = Field(default=None, max_length=128)
+    display_name_ko: str | None = Field(default=None, max_length=256)
     role: str | None = Field(default=None, max_length=32)
     tier: int | None = Field(default=None, ge=1, le=4)
     domain: str | None = None
@@ -372,7 +378,7 @@ class OrgAgentUpdate(BaseModel):
     decision_focus: list | None = None
     weights: dict | None = None
     trust_map: dict | None = None
-    system_prompt_template: str | None = None
+    system_prompt_template: str | None = Field(default=None, max_length=4000)
     enabled: bool | None = None
     sort_order: int | None = None
 
@@ -486,7 +492,7 @@ class OrgChapterCreate(BaseModel):
     shared_directives: list = Field(default_factory=list)
     shared_constraints: list = Field(default_factory=list)
     shared_decision_focus: list = Field(default_factory=list)
-    chapter_prompt: str = ""
+    chapter_prompt: str = Field(default="", max_length=2000)
     color: str = Field(default="#8b5cf6", max_length=7)
     icon: str = Field(default="📁", max_length=4)
     sort_order: int = 0
@@ -498,7 +504,7 @@ class OrgChapterUpdate(BaseModel):
     shared_directives: list | None = None
     shared_constraints: list | None = None
     shared_decision_focus: list | None = None
-    chapter_prompt: str | None = None
+    chapter_prompt: str | None = Field(default=None, max_length=2000)
     color: str | None = Field(default=None, max_length=7)
     icon: str | None = Field(default=None, max_length=4)
     sort_order: int | None = None
