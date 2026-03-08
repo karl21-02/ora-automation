@@ -97,7 +97,12 @@ export async function getReport(filename: string): Promise<string> {
   return res.text()
 }
 
-export async function createRun(plan: ChatPlan, userPrompt: string, orgId?: string | null): Promise<OrchestrationRun> {
+export async function createRun(
+  plan: ChatPlan,
+  userPrompt: string,
+  orgId?: string | null,
+  guestAgentIds?: string[],
+): Promise<OrchestrationRun> {
   return request<OrchestrationRun>(`${BASE}/orchestrations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -106,6 +111,7 @@ export async function createRun(plan: ChatPlan, userPrompt: string, orgId?: stri
       target: plan.target,
       env: plan.env,
       org_id: orgId ?? undefined,
+      guest_agent_ids: guestAgentIds && guestAgentIds.length > 0 ? guestAgentIds : undefined,
     }),
   })
 }

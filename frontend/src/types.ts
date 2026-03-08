@@ -61,6 +61,7 @@ export interface OrchestrationRun {
   pause_requested: boolean
   cancel_requested: boolean
   pipeline_stages: string[] | null
+  guest_agent_ids: string[]
   exit_code: number | null
   error_message: string | null
   created_at: string
