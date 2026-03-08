@@ -235,3 +235,59 @@ class TestGuestAgentE2E:
         assert get_resp.status_code == 200
         data = get_resp.json()
         assert f"{org_id}:ReadTestAgent" in data["guest_agent_ids"]
+
+    def test_run_without_guests_has_empty_list(self, client):
+        """Run without guest_agent_ids has empty list."""
+        run_resp = client.post("/api/v1/orchestrations", json={
+            "user_prompt": "No guests",
+            "dry_run": True,
+        })
+        assert run_resp.status_code == 202
+        data = run_resp.json()
+        assert data["guest_agent_ids"] == []
+
+    def test_run_with_invalid_guest_format(self, client):
+        """Invalid guest format is stored but skipped during load."""
+        run_resp = client.post("/api/v1/orchestrations", json={
+            "user_prompt": "Invalid guest format",
+            "guest_agent_ids": ["invalid_no_colon"],
+            "dry_run": True,
+        })
+        assert run_resp.status_code == 202
+        data = run_resp.json()
+        # Invalid format is still stored
+        assert data["guest_agent_ids"] == ["invalid_no_colon"]
+
+    def test_run_with_nonexistent_guest(self, client):
+        """Non-existent guest agent is stored but skipped during load."""
+        run_resp = client.post("/api/v1/orchestrations", json={
+            "user_prompt": "Nonexistent guest",
+            "guest_agent_ids": ["nonexistent-org:NonExistent"],
+            "dry_run": True,
+        })
+        assert run_resp.status_code == 202
+        data = run_resp.json()
+        assert data["guest_agent_ids"] == ["nonexistent-org:NonExistent"]
+
+
+class TestGuestAgentFieldValidation:
+    """Test guest_agent_ids field validation."""
+
+    def test_guest_agent_ids_accepts_list(self, client):
+        """guest_agent_ids accepts a list of strings."""
+        run_resp = client.post("/api/v1/orchestrations", json={
+            "user_prompt": "Test",
+            "guest_agent_ids": ["org1:agent1", "org2:agent2"],
+            "dry_run": True,
+        })
+        assert run_resp.status_code == 202
+        assert run_resp.json()["guest_agent_ids"] == ["org1:agent1", "org2:agent2"]
+
+    def test_guest_agent_ids_default_empty(self, client):
+        """guest_agent_ids defaults to empty list if not provided."""
+        run_resp = client.post("/api/v1/orchestrations", json={
+            "user_prompt": "Test without guests",
+            "dry_run": True,
+        })
+        assert run_resp.status_code == 202
+        assert run_resp.json()["guest_agent_ids"] == []
