@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getOrg, listOrgs } from '../lib/api'
-import type { OrgAgent, Organization, OrganizationDetail } from '../types'
+import type { Organization, OrganizationDetail } from '../types'
 
 interface Props {
   currentOrgId: string | null

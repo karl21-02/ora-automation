@@ -160,7 +160,7 @@ export default function Sidebar({
           {APP_NAME}
         </span>
         <button
-          onClick={onNewConversation}
+          onClick={() => onNewConversation()}
           title="New Chat"
           style={{
             width: 28,

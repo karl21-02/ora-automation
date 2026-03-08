@@ -23,7 +23,7 @@ const STAGE_COLORS: Record<string, string> = {
   validation: '#f59e0b',
 }
 
-export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, conversationId, orgId, orgName, orgs, onChangeOrg }: Props) {
+export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, conversationId, orgId, orgName: _orgName, orgs, onChangeOrg }: Props) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [streaming, setStreaming] = useState(false)
