@@ -310,6 +310,7 @@ def create_run(db: Session, payload: OrchestrationRunCreate) -> tuple[Orchestrat
         target=target,
         agent_role=agent_role,
         org_id=getattr(payload, "org_id", None),
+        guest_agent_ids=getattr(payload, "guest_agent_ids", []) or [],
         command=command,
         rollback_command=rollback_command,
         env=env,
