@@ -5,7 +5,7 @@ import ProjectSelectCard from './ProjectSelectCard'
 
 interface Props {
   message: Message
-  onExecute?: (plan: ChatPlan, confirmViaChat?: boolean) => void
+  onExecute?: (plan: ChatPlan, confirmViaChat?: boolean, guestAgentIds?: string[]) => void
   onExecuteBatch?: (plans: ChatPlan[]) => void
   onDismissPlan?: () => void
   onChoiceClick?: (value: string) => void
@@ -13,6 +13,8 @@ interface Props {
   onConfirmDialog?: () => void
   onRejectDialog?: () => void
   onOrgRecommendSelect?: (orgId: string | null) => void
+  onOpenGuestPicker?: () => void
+  guestAgentIds?: string[]
   executing?: boolean
 }
 
@@ -28,7 +30,7 @@ const ALLOWED_TARGETS = [
   'run-single', 'e2e-service', 'e2e-service-all', 'verify-sources',
 ]
 
-export default function MessageBubble({ message, onExecute, onExecuteBatch, onDismissPlan, onChoiceClick, onProjectConfirm, onConfirmDialog, onRejectDialog, onOrgRecommendSelect, executing }: Props) {
+export default function MessageBubble({ message, onExecute, onExecuteBatch, onDismissPlan, onChoiceClick, onProjectConfirm, onConfirmDialog, onRejectDialog, onOrgRecommendSelect, onOpenGuestPicker, guestAgentIds = [], executing }: Props) {
   const isUser = message.role === 'user'
   const [editing, setEditing] = useState(false)
   const [editTarget, setEditTarget] = useState(message.plan?.target || '')
@@ -496,11 +498,33 @@ export default function MessageBubble({ message, onExecute, onExecuteBatch, onDi
                   </div>
                 )}
 
+                {/* Guest agents badge */}
+                {guestAgentIds.length > 0 && (
+                  <div style={{
+                    marginBottom: 8,
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    backgroundColor: '#eff6ff',
+                    border: '1px solid #bfdbfe',
+                    fontSize: 12,
+                    color: '#1e40af',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}>
+                    <span>{'\u{1F465}'}</span>
+                    <span style={{ fontWeight: 500 }}>게스트: {guestAgentIds.length}명</span>
+                    <span style={{ color: '#6b7280', fontSize: 11 }}>
+                      ({guestAgentIds.map((g) => g.split(':')[1]).join(', ')})
+                    </span>
+                  </div>
+                )}
+
                 {/* Action buttons */}
                 {onExecute && (
                   <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                     <button
-                      onClick={() => onExecute(message.plan!, message.confirmationRequired ?? false)}
+                      onClick={() => onExecute(message.plan!, message.confirmationRequired ?? false, guestAgentIds)}
                       disabled={executing}
                       style={{
                         flex: 1,
@@ -516,6 +540,24 @@ export default function MessageBubble({ message, onExecute, onExecuteBatch, onDi
                     >
                       {executing ? 'Executing...' : 'Execute'}
                     </button>
+                    {!executing && onOpenGuestPicker && (
+                      <button
+                        onClick={onOpenGuestPicker}
+                        title="게스트 에이전트 추가"
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: 7,
+                          border: '1px solid #bfdbfe',
+                          backgroundColor: '#eff6ff',
+                          color: '#2563eb',
+                          fontWeight: 500,
+                          fontSize: 13,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {'\u{1F465}'} {guestAgentIds.length > 0 ? guestAgentIds.length : '+'}
+                      </button>
+                    )}
                     {!executing && onDismissPlan && (
                       <button
                         onClick={onDismissPlan}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createBatchRuns, createRun, getRun, getRunEvents, sendChatStream, type ChatHistoryMessage } from '../lib/api'
 import { APP_NAME } from '../lib/constants'
 import type { ChatPlan, DialogState, Message, OrchestrationEvent, OrchestrationRun, Organization } from '../types'
+import GuestAgentPicker from './GuestAgentPicker'
 import MessageBubble from './MessageBubble'
 
 interface Props {
@@ -30,6 +31,8 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
   const [activeRunIds, setActiveRunIds] = useState<string[]>([])
   const [runStatuses, setRunStatuses] = useState<Record<string, OrchestrationRun>>({})
   const [runEvents, setRunEvents] = useState<OrchestrationEvent[]>([])
+  const [showGuestPicker, setShowGuestPicker] = useState(false)
+  const [selectedGuestAgents, setSelectedGuestAgents] = useState<string[]>([])
   const endRef = useRef<HTMLDivElement>(null)
   const logEndRef = useRef<HTMLDivElement>(null)
 
@@ -181,7 +184,7 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
     }
   }, [input, loading, conversationId, onNewMessage, onUpdateMessage, messages, orgId])
 
-  const handleExecute = useCallback(async (plan: ChatPlan, confirmViaChat?: boolean) => {
+  const handleExecute = useCallback(async (plan: ChatPlan, confirmViaChat?: boolean, guestAgentIds?: string[]) => {
     // UPCE mode: send "확인" as a chat message instead of direct API call
     if (confirmViaChat) {
       handleSend('확인')
@@ -194,13 +197,17 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
     setExecutingPlanId(plan.target)
     setRunEvents([])
     try {
-      const run = await createRun(plan, prompt, orgId)
+      const run = await createRun(plan, prompt, orgId, guestAgentIds)
       setActiveRunIds([run.id])
       setRunStatuses({ [run.id]: run })
+      setSelectedGuestAgents([])  // Clear guest selection after execution
+      const guestInfo = guestAgentIds && guestAgentIds.length > 0
+        ? ` with ${guestAgentIds.length} guest agent(s)`
+        : ''
       onNewMessage({
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: `Orchestration started: **${run.target}** (run: \`${run.id}\`)`,
+        content: `Orchestration started: **${run.target}**${guestInfo} (run: \`${run.id}\`)`,
         runId: run.id,
         timestamp: new Date(),
       })
@@ -213,7 +220,7 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
         timestamp: new Date(),
       })
     }
-  }, [messages, onNewMessage, handleSend])
+  }, [messages, onNewMessage, handleSend, orgId])
 
   const handleExecuteBatch = useCallback(async (plans: ChatPlan[]) => {
     const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
@@ -370,6 +377,8 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
               onOrgRecommendSelect={isLastAssistant && msg.orgRecommend && msg.orgRecommend.length > 0 ? handleOrgRecommendSelect : undefined}
               onConfirmDialog={isLastAssistant && msg.confirmationRequired ? () => handleSend('확인') : undefined}
               onRejectDialog={isLastAssistant && msg.confirmationRequired ? () => handleSend('취소') : undefined}
+              onOpenGuestPicker={isLastAssistant && msg.plan ? () => setShowGuestPicker(true) : undefined}
+              guestAgentIds={isLastAssistant && msg.plan ? selectedGuestAgents : undefined}
               executing={executingPlanId != null && (executingPlanId === msg.plan?.target || executingPlanId === 'batch')}
             />
           )
@@ -562,6 +571,16 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
           Send
         </button>
       </div>
+
+      {/* Guest Agent Picker Modal */}
+      {showGuestPicker && (
+        <GuestAgentPicker
+          currentOrgId={orgId}
+          selectedGuests={selectedGuestAgents}
+          onSelect={setSelectedGuestAgents}
+          onClose={() => setShowGuestPicker(false)}
+        />
+      )}
     </div>
   )
 }
