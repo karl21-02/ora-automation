@@ -27,6 +27,7 @@ class OrchestrationRun(Base):
     env: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     pipeline_stages: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     current_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    guest_agent_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
     fail_label: Mapped[str] = mapped_column(String(16), nullable=False, default="")
