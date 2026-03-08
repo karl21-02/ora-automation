@@ -490,6 +490,106 @@ def _load_org_config(db: Session, org_id: str | None) -> dict | None:
     }
 
 
+def _load_guest_agents(db: Session, guest_agent_ids: list[str]) -> list[dict]:
+    """Load guest agents from other organizations.
+
+    Args:
+        db: Database session
+        guest_agent_ids: List of "org_id:agent_id" strings
+
+    Returns:
+        List of agent dicts with is_guest=True marker
+    """
+    guests = []
+    for spec in guest_agent_ids:
+        if ":" not in spec:
+            logger.warning("Invalid guest_agent_id format: %s (expected 'org_id:agent_id')", spec)
+            continue
+        parts = spec.split(":", 1)
+        guest_org_id, agent_id = parts[0], parts[1]
+
+        agent = (
+            db.query(OrganizationAgent)
+            .filter(
+                OrganizationAgent.org_id == guest_org_id,
+                OrganizationAgent.agent_id == agent_id,
+            )
+            .first()
+        )
+        if not agent:
+            logger.warning("Guest agent not found: %s", spec)
+            continue
+        if not agent.enabled:
+            logger.warning("Guest agent is disabled: %s", spec)
+            continue
+
+        guests.append({
+            "agent_id": f"guest_{agent.agent_id}",
+            "display_name": f"[Guest] {agent.display_name}",
+            "display_name_ko": f"[게스트] {agent.display_name_ko}" if agent.display_name_ko else "",
+            "role": agent.role,
+            "tier": agent.tier,
+            "domain": agent.domain,
+            "team": agent.team,
+            "personality": agent.personality,
+            "behavioral_directives": agent.behavioral_directives,
+            "constraints": agent.constraints,
+            "decision_focus": agent.decision_focus,
+            "weights": agent.weights,
+            "trust_map": agent.trust_map,
+            "system_prompt_template": agent.system_prompt_template,
+            "enabled": True,
+            "silo_id": None,  # Guest agents don't belong to host silos
+            "chapter_id": None,  # Guest agents don't belong to host chapters
+            "is_clevel": True,  # Participate in Level 3 (C-Level) deliberation
+            "weight_score": agent.weight_score,
+            "is_guest": True,  # Marker for guest agents
+            "source_org_id": guest_org_id,
+            "source_agent_id": agent.agent_id,
+        })
+    return guests
+
+
+def _merge_guest_agents(org_config: dict | None, guest_agents: list[dict]) -> dict | None:
+    """Merge guest agents into org_config.
+
+    Args:
+        org_config: Base organization config (may be None)
+        guest_agents: List of guest agent dicts from _load_guest_agents
+
+    Returns:
+        Merged org_config or None if both inputs are empty
+    """
+    if not guest_agents:
+        return org_config
+    if not org_config:
+        # No base org, create minimal config with just guests
+        return {
+            "org_id": None,
+            "org_name": "Guest-only",
+            "pipeline_params": {},
+            "agents": guest_agents,
+            "silos": [],
+            "chapters": [],
+            "flat_mode_agents": [g["agent_id"] for g in guest_agents],
+            "agent_final_weights": {g["agent_id"]: g["weight_score"] for g in guest_agents},
+        }
+    # Merge guests into existing config
+    merged = dict(org_config)
+    merged["agents"] = list(org_config.get("agents", [])) + guest_agents
+    # Add guests to flat_mode_agents if not already present
+    flat_agents = set(org_config.get("flat_mode_agents", []))
+    for g in guest_agents:
+        flat_agents.add(g["agent_id"])
+    merged["flat_mode_agents"] = list(flat_agents)
+    # Add guests to agent_final_weights
+    weights = dict(org_config.get("agent_final_weights", {}))
+    for g in guest_agents:
+        weights[g["agent_id"]] = g["weight_score"]
+    merged["agent_final_weights"] = weights
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # Execute run (in-process pipeline)
 # ---------------------------------------------------------------------------
@@ -562,6 +662,20 @@ def execute_run(
         )
 
         org_config = _load_org_config(db, run.org_id)
+
+        # Load and merge guest agents if specified
+        if run.guest_agent_ids:
+            guest_agents = _load_guest_agents(db, run.guest_agent_ids)
+            org_config = _merge_guest_agents(org_config, guest_agents)
+            if guest_agents:
+                _record_event(
+                    db,
+                    run.id,
+                    "execution",
+                    "guests_loaded",
+                    f"loaded {len(guest_agents)} guest agent(s)",
+                    {"guest_agent_ids": [g["agent_id"] for g in guest_agents]},
+                )
 
         outcome = _run_pipeline(
             db=db,
