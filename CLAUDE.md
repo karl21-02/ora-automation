@@ -186,6 +186,14 @@ except Exception:
 - Convergence check: `is_converged(prev, curr, threshold)` in `convergence.py`
 - See `docs/AGENT_ORG_CUSTOMIZATION_PLAN.md` for full architecture
 
+### Guest Agent Collaboration (V2)
+- Borrow agents from other organizations for a single run
+- API: `POST /api/v1/orchestrations` with `guest_agent_ids: ["org_id:agent_id", ...]`
+- Guest agents are loaded via `_load_guest_agents()` in `service.py`
+- Merged into org_config via `_merge_guest_agents()` before pipeline execution
+- Guests participate in Level 3 deliberation (`is_clevel=True`)
+- Guest agent IDs are prefixed with `guest_` and display names with `[Guest]`
+
 ### Idempotent Sync (Notion)
 - `notion_sync_state` table tracks all Notion page/DB IDs with `(entity_type, entity_key)` unique constraint
 - Setup, publish, sync endpoints all check existing state before creating — safe to call repeatedly
@@ -282,7 +290,7 @@ except Exception:
 ## Testing
 
 ```bash
-# All Python tests (293 tests — chat, dialog, notion, scheduler, orgs, convergence)
+# All Python tests (304 tests — chat, dialog, notion, scheduler, orgs, convergence, guest)
 PYTHONPATH=src python3 -m pytest tests/ -v
 
 # TypeScript type check
