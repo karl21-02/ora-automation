@@ -63,14 +63,14 @@ Scheduler (poll DB) ──> create_run() ──> RabbitMQ ──> Worker
 ```
 ora-automation/
 ├── src/
-│   ├── ora_rd_orchestrator/      # Core orchestration engine (12+ modules)
+│   ├── ora_rd_orchestrator/      # Core orchestration engine (15+ modules)
 │   │   ├── pipeline.py           # Main entry: generate_report()
-│   │   ├── engine.py             # Legacy monolith (backward compat)
+│   │   ├── convergence.py        # LangGraph 3-level convergence (chapter→silo→C-level)
 │   │   ├── cli.py                # CLI entry point
 │   │   ├── config.py             # Constants, env vars, profiles
 │   │   ├── types.py              # All dataclasses
 │   │   ├── llm_client.py         # run_llm_command() subprocess wrapper
-│   │   ├── personas.py           # PersonaRegistry (20 YAML personas)
+│   │   ├── personas.py           # PersonaRegistry (24 YAML personas)
 │   │   ├── workspace.py          # File scanning, analyze_workspace()
 │   │   ├── topic_discovery.py    # LLM topic discovery + legacy fallback
 │   │   ├── scoring.py            # LLM scoring + legacy formula
@@ -83,6 +83,8 @@ ora-automation/
 │   └── ora_automation_api/       # FastAPI backend
 │       ├── main.py               # App entry, router registration, DDL migration
 │       ├── chat_router.py        # Chat + conversations + reports + projects
+│       ├── org_router.py         # Organization CRUD + agents/silos/chapters
+│       ├── dialog_engine.py      # UPCE dialog engine (intent→action)
 │       ├── notion_client.py      # Notion REST API client (retry, backoff)
 │       ├── notion_publisher.py   # Report JSON → Notion pages/blocks
 │       ├── notion_router.py      # Notion endpoints (setup, publish, sync, status)
@@ -90,7 +92,7 @@ ora-automation/
 │       ├── scheduler_router.py   # Scheduler CRUD API
 │       ├── scheduling_handler.py # NL scheduling → ScheduledJob (validate + create)
 │       ├── schemas.py            # Pydantic request/response models
-│       ├── models.py             # SQLAlchemy ORM (+ NotionSyncState, ScheduledJob)
+│       ├── models.py             # SQLAlchemy ORM (+ Organization, ScheduledJob)
 │       ├── database.py           # DB session management
 │       ├── config.py             # API settings (env vars)
 │       ├── service.py            # Run execution logic + auto-publish hook
@@ -175,6 +177,15 @@ except Exception:
 - `PersonaRegistry.to_agent_definitions()` bridges to legacy format
 - See `docs/TOSS_REORG_PLAN.md` for full reorganization plan
 
+### LangGraph 3-Level Convergence
+- Organization-aware pipeline in `convergence.py`
+- **Level 1**: Chapter-internal deliberation (parallel per chapter)
+- **Level 2**: Silo-internal deliberation (parallel per silo)
+- **Level 3**: C-Level + silo representatives full deliberation
+- Each level loops until scores converge (max delta < threshold) or max_rounds
+- Convergence check: `is_converged(prev, curr, threshold)` in `convergence.py`
+- See `docs/AGENT_ORG_CUSTOMIZATION_PLAN.md` for full architecture
+
 ### Idempotent Sync (Notion)
 - `notion_sync_state` table tracks all Notion page/DB IDs with `(entity_type, entity_key)` unique constraint
 - Setup, publish, sync endpoints all check existing state before creating — safe to call repeatedly
@@ -222,6 +233,14 @@ except Exception:
 - `GET/PATCH/DELETE /api/v1/scheduler/jobs/{id}` — Get/update/delete job
 - `POST /api/v1/scheduler/jobs/{id}/run` — Manual trigger
 
+**Organizations:**
+- `GET/POST /api/v1/orgs` — List/create organizations
+- `GET/PATCH/DELETE /api/v1/orgs/{id}` — Get/update/delete org
+- `POST /api/v1/orgs/{id}/clone` — Deep copy org (silos, chapters, agents)
+- `POST/PATCH/DELETE /api/v1/orgs/{id}/agents/{id}` — Agent CRUD
+- `POST/PATCH/DELETE /api/v1/orgs/{id}/silos/{id}` — Silo CRUD
+- `POST/PATCH/DELETE /api/v1/orgs/{id}/chapters/{id}` — Chapter CRUD
+
 **Health:**
 - `GET /health` — API health check
 
@@ -259,12 +278,11 @@ except Exception:
 - Set `PYTHONPATH=src` when running tests or scripts outside Make
 - The frontend proxies `/api` to `localhost:8000` in dev mode (vite.config.ts)
 - In Docker, the workspace is mounted at `/workspace/Ora`
-- `engine.py` is the legacy monolith (~4600 lines) — kept for backward compat, prefer the modular pipeline
 
 ## Testing
 
 ```bash
-# All Python tests (96 tests — chat, dialog, notion, scheduler, scheduling, upce)
+# All Python tests (293 tests — chat, dialog, notion, scheduler, orgs, convergence)
 PYTHONPATH=src python3 -m pytest tests/ -v
 
 # TypeScript type check
