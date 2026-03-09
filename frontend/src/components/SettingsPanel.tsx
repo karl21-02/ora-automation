@@ -1,9 +1,13 @@
+import GitHubSettings from './GitHubSettings'
+import ProjectListPanel from './ProjectListPanel'
+
 export default function SettingsPanel() {
   return (
     <div style={{
       flex: 1,
       padding: 24,
       backgroundColor: '#fff',
+      overflowY: 'auto',
     }}>
       <h2 style={{
         margin: 0,
@@ -14,6 +18,22 @@ export default function SettingsPanel() {
       }}>
         Settings
       </h2>
+
+      <GitHubSettings />
+
+      <div style={{
+        height: 1,
+        backgroundColor: '#e5e7eb',
+        margin: '24px 0',
+      }} />
+
+      <ProjectListPanel />
+
+      <div style={{
+        height: 1,
+        backgroundColor: '#e5e7eb',
+        margin: '24px 0',
+      }} />
 
       <div style={{ marginBottom: 24 }}>
         <h3 style={{
