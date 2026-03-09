@@ -443,6 +443,20 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
         </Section>
       )}
 
+      {/* Chapter hint in Basic mode */}
+      {mode === 'basic' && org.chapters.length > 0 && (
+        <div
+          style={chapterHintStyle}
+          onClick={() => setMode('advanced')}
+        >
+          <span style={{ fontSize: 14 }}>💡</span>
+          <span>
+            이 조직에 <strong>{org.chapters.length}개의 Chapter</strong>가 있습니다.
+            <span style={{ color: '#2563eb', marginLeft: 4 }}>Advanced 모드에서 확인 →</span>
+          </span>
+        </div>
+      )}
+
       {/* Advanced mode sections */}
       {mode === 'advanced' && (
         <>
@@ -756,4 +770,19 @@ const pipelineGridStyle: React.CSSProperties = {
   display: 'grid',
   gridTemplateColumns: '1fr 1fr 1fr',
   gap: '0 16px',
+}
+
+const chapterHintStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '10px 14px',
+  marginBottom: 16,
+  borderRadius: 8,
+  backgroundColor: '#fefce8',
+  border: '1px solid #fde047',
+  fontSize: 13,
+  color: '#713f12',
+  cursor: 'pointer',
+  transition: 'all 0.15s ease',
 }
