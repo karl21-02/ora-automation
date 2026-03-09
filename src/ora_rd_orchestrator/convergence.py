@@ -44,6 +44,13 @@ SCORE_MAX = 10.0
 SCORE_DEFAULT = 5.0
 
 
+def _compute_average(values: list[float], decimals: int = 4) -> float:
+    """Compute average with rounding, returns 0.0 for empty list."""
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), decimals)
+
+
 # ---------------------------------------------------------------------------
 # LangGraph state schema
 # ---------------------------------------------------------------------------
@@ -198,7 +205,7 @@ def _aggregate_chapter_scores(
                 accum[tid].setdefault(k, []).append(float(v))
     result: dict[str, dict[str, float]] = {}
     for tid, keys in accum.items():
-        result[tid] = {k: round(sum(vs) / len(vs), 4) for k, vs in keys.items()}
+        result[tid] = {k: _compute_average(vs) for k, vs in keys.items()}
     return result
 
 
@@ -449,7 +456,7 @@ def _run_silo_deliberation(
     topic_scores_flat: dict[str, float] = {}
     for tid, per_agent in final_scores.items():
         vals = [v for v in per_agent.values() if isinstance(v, (int, float))]
-        topic_scores_flat[tid] = round(sum(vals) / len(vals), 4) if vals else 0.0
+        topic_scores_flat[tid] = _compute_average(vals)
 
     return {
         "silo_id": silo_id,
@@ -471,7 +478,7 @@ def _build_ranked_from_scores(
     for tid in topic_ids:
         per_topic = working_scores.get(tid, {})
         vals = [v for v in per_topic.values() if isinstance(v, (int, float))]
-        total = round(sum(vals) / len(vals), 4) if vals else 0.0
+        total = _compute_average(vals)
         ranked.append({
             "topic_id": tid,
             "topic_name": tid,
