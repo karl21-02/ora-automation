@@ -93,10 +93,17 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
             </button>
           ))}
 
+          {/* Empty state hint */}
+          {orgs.length === 0 && onCreateNew && (
+            <div style={emptyHintStyle}>
+              아직 조직이 없습니다. 나만의 AI 조직을 만들어보세요!
+            </div>
+          )}
+
           {/* Create new option */}
           {onCreateNew && (
             <>
-              <div style={dividerStyle} />
+              {orgs.length > 0 && <div style={dividerStyle} />}
               <button
                 onClick={() => { onCreateNew(); setOpen(false) }}
                 style={{ ...itemStyle, color: '#2563eb' }}
@@ -187,4 +194,14 @@ const presetBadgeSmall: React.CSSProperties = {
   backgroundColor: '#dbeafe',
   color: '#2563eb',
   fontWeight: 500,
+}
+
+const emptyHintStyle: React.CSSProperties = {
+  padding: '12px 16px',
+  fontSize: 12,
+  color: '#6b7280',
+  textAlign: 'center',
+  backgroundColor: '#f9fafb',
+  borderRadius: 6,
+  margin: '4px 8px',
 }
