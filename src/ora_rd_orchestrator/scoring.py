@@ -13,11 +13,9 @@ from .config import LLM_SCORING_CMD_ENV
 from .llm_client import run_llm_command
 from .types import AgentPersona, LLMResult, TopicState
 
+from .utils import clamp_score as _clamp
+
 logger = logging.getLogger(__name__)
-
-
-def _clamp(value: float, lo: float = 0.0, hi: float = 10.0) -> float:
-    return max(lo, min(hi, round(value, 2)))
 
 
 _SCORING_SYSTEM_PROMPT = """\

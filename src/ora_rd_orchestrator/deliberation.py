@@ -29,12 +29,12 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _agent_score_key(agent: str) -> str:
-    return f"score_{agent}"
+from .utils import clamp_score
 
 
 def _clamp_score(value: float, lo: float = 0.0, hi: float = 10.0) -> float:
-    return max(lo, min(hi, round(value, 4)))
+    """Clamp score with 4 decimal precision for deliberation."""
+    return clamp_score(value, lo, hi, decimals=4)
 
 
 # ---------------------------------------------------------------------------

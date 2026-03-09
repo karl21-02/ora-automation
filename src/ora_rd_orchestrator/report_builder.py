@@ -638,15 +638,14 @@ def generate_feasibility_evidence_via_llm(
 
 
 # ---------------------------------------------------------------------------
-# Utility helpers
+# Utility helpers (re-exported from utils for backward compatibility)
 # ---------------------------------------------------------------------------
 
-def _agent_score_key(agent: str) -> str:
-    return agent.lower().replace(" ", "_")
+from .utils import agent_score_key, clamp_score
 
-
-def _clamp_score(value: float, lo: float = 0.0, hi: float = 10.0) -> float:
-    return max(lo, min(hi, round(value, 2)))
+# Backward compatibility aliases
+_agent_score_key = agent_score_key
+_clamp_score = clamp_score
 
 
 # ---------------------------------------------------------------------------
