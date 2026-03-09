@@ -673,13 +673,7 @@ def level3_node(state: dict) -> dict:
                 per_topic[_agent_score_key(sr["silo_id"][:8])] = float(silo_score)
         working_scores[tid] = per_topic
 
-    topic_catalog: dict[str, Any] = {}
-    for tid in topic_ids:
-        topic_catalog[tid] = type("_TS", (), {"topic_name": tid, "evidence": [], "project_hits": {},
-                                               "compute_features": lambda self=None: {},
-                                               "keyword_hits": 0, "business_hits": 0,
-                                               "novelty_hits": 0, "code_hits": 0,
-                                               "doc_hits": 0, "history_hits": 0})()
+    topic_catalog = _build_mock_topic_catalog(topic_ids)
 
     participant_defs = {k: v for k, v in state["agent_definitions"].items() if k in participants}
     ranked = _build_ranked_from_scores(topic_ids, working_scores)
