@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from .database import get_db
 from .models import Organization, OrganizationAgent, OrganizationChapter, OrganizationSilo
+from .org_templates import get_template
 from .schemas import (
     OrganizationCreate,
     OrganizationDetail,
@@ -71,6 +72,7 @@ def create_org(
     existing = db.query(Organization).filter(Organization.name == payload.name).first()
     if existing:
         raise HTTPException(status_code=409, detail="organization name already exists")
+
     org = Organization(
         id=uuid4().hex[:36],
         name=payload.name,
@@ -82,10 +84,97 @@ def create_org(
         pipeline_params=payload.pipeline_params,
     )
     db.add(org)
+    db.flush()
+
+    # Apply template if specified
+    template = get_template(payload.template_id)
+    new_silos: list[OrganizationSilo] = []
+    new_chapters: list[OrganizationChapter] = []
+    new_agents: list[OrganizationAgent] = []
+
+    if template and (template.silos or template.chapters or template.agents):
+        # Create silos with ID mapping
+        silo_name_to_id: dict[str, str] = {}
+        for idx, ts in enumerate(template.silos):
+            silo_id = uuid4().hex[:36]
+            silo_name_to_id[ts.name] = silo_id
+            silo = OrganizationSilo(
+                id=silo_id,
+                org_id=org.id,
+                name=ts.name,
+                description=ts.description,
+                color=ts.color,
+                sort_order=idx,
+            )
+            db.add(silo)
+            new_silos.append(silo)
+
+        # Create chapters with ID mapping
+        chapter_name_to_id: dict[str, str] = {}
+        for idx, tc in enumerate(template.chapters):
+            chapter_id = uuid4().hex[:36]
+            chapter_name_to_id[tc.name] = chapter_id
+            chapter = OrganizationChapter(
+                id=chapter_id,
+                org_id=org.id,
+                name=tc.name,
+                description=tc.description,
+                shared_directives=tc.shared_directives,
+                shared_constraints=[],
+                shared_decision_focus=[],
+                chapter_prompt="",
+                color=tc.color,
+                icon=tc.icon,
+                sort_order=idx,
+            )
+            db.add(chapter)
+            new_chapters.append(chapter)
+
+        db.flush()
+
+        # Create agents with resolved silo_id / chapter_id
+        for idx, ta in enumerate(template.agents):
+            agent = OrganizationAgent(
+                id=uuid4().hex[:36],
+                org_id=org.id,
+                agent_id=ta.agent_id,
+                silo_id=silo_name_to_id.get(ta.silo) if ta.silo else None,
+                chapter_id=chapter_name_to_id.get(ta.chapter) if ta.chapter else None,
+                is_clevel=ta.is_clevel,
+                weight_score=1.0,
+                display_name=ta.display_name,
+                display_name_ko=ta.display_name_ko,
+                role=ta.role,
+                tier=ta.tier,
+                domain=None,
+                team=ta.team,
+                personality={},
+                behavioral_directives=[],
+                constraints=[],
+                decision_focus=[],
+                weights=ta.weights,
+                trust_map={},
+                system_prompt_template="",
+                enabled=True,
+                sort_order=idx,
+            )
+            db.add(agent)
+            new_agents.append(agent)
+
     db.commit()
     db.refresh(org)
-    return OrganizationDetail.model_validate(
-        {**OrganizationRead.model_validate(org).model_dump(), "agents": [], "silos": [], "chapters": []}
+    for s in new_silos:
+        db.refresh(s)
+    for c in new_chapters:
+        db.refresh(c)
+    for a in new_agents:
+        db.refresh(a)
+
+    return OrganizationDetail(
+        **OrganizationRead.model_validate(org).model_dump(),
+        agents=[OrgAgentRead.model_validate(a) for a in new_agents],
+        silos=[OrgSiloRead.model_validate(s) for s in new_silos],
+        chapters=[OrgChapterRead.model_validate(c) for c in new_chapters],
     )
 
 

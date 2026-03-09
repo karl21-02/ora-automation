@@ -250,6 +250,7 @@ export async function getOrg(orgId: string): Promise<OrganizationDetail> {
 export async function createOrg(data: {
   name: string
   description?: string
+  template_id?: string
   teams?: Record<string, string[]>
   flat_mode_agents?: string[]
   agent_final_weights?: Record<string, number>

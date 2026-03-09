@@ -420,6 +420,11 @@ class OrgAgentRead(BaseModel):
 class OrganizationCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     description: str | None = None
+    template_id: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Template to use: 'toss', 'research', 'security', 'empty'. Defaults to 'empty'.",
+    )
     teams: dict = Field(default_factory=dict)
     flat_mode_agents: list[str] = Field(default_factory=list)
     agent_final_weights: dict[str, float] = Field(default_factory=dict)

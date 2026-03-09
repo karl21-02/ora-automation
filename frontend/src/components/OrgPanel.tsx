@@ -6,6 +6,7 @@ import ChapterEditor from './ChapterEditor'
 import OrgChart from './OrgChart'
 import OrgDesigner from './OrgDesigner'
 import OrgEditor from './OrgEditor'
+import OrgTemplateModal from './OrgTemplateModal'
 
 interface OrgPanelProps {
   onOrgsChanged?: () => void
@@ -15,8 +16,8 @@ export default function OrgPanel({ onOrgsChanged }: OrgPanelProps = {}) {
   const [orgs, setOrgs] = useState<Organization[]>([])
   const [selectedOrg, setSelectedOrg] = useState<OrganizationDetail | null>(null)
   const [loading, setLoading] = useState(true)
-  const [creating, setCreating] = useState(false)
-  const [newName, setNewName] = useState('')
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
+  const [creatingOrg, setCreatingOrg] = useState(false)
   const [cloneName, setCloneName] = useState('')
   const [cloningId, setCloningId] = useState<string | null>(null)
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
@@ -37,16 +38,19 @@ export default function OrgPanel({ onOrgsChanged }: OrgPanelProps = {}) {
 
   useEffect(() => { refresh() }, [refresh])
 
-  const handleCreate = async () => {
-    if (!newName.trim()) return
+  const handleCreate = async (name: string, templateId: string) => {
     setError('')
+    setCreatingOrg(true)
     try {
-      await createOrg({ name: newName.trim() })
-      setNewName('')
-      setCreating(false)
+      const detail = await createOrg({ name, template_id: templateId })
+      setShowTemplateModal(false)
       await refresh()
+      // Automatically navigate to the new org
+      setSelectedOrg(detail)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create org')
+    } finally {
+      setCreatingOrg(false)
     }
   }
 
@@ -187,25 +191,17 @@ export default function OrgPanel({ onOrgsChanged }: OrgPanelProps = {}) {
       <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontWeight: 700, fontSize: 16 }}>Organizations</span>
         <div style={{ flex: 1 }} />
-        <button onClick={() => setCreating(true)} style={createBtnStyle}>+ New</button>
+        <button onClick={() => setShowTemplateModal(true)} style={createBtnStyle}>+ New</button>
       </div>
 
       {error && <div style={{ padding: '8px 16px', color: '#ef4444', fontSize: 13 }}>{error}</div>}
 
-      {creating && (
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid #e5e7eb', display: 'flex', gap: 8 }}>
-          <input
-            type="text"
-            placeholder="Organization name"
-            value={newName}
-            onChange={e => setNewName(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleCreate() }}
-            style={inputStyle}
-            autoFocus
-          />
-          <button onClick={handleCreate} style={createBtnStyle}>Create</button>
-          <button onClick={() => { setCreating(false); setNewName('') }} style={cancelBtnStyle}>Cancel</button>
-        </div>
+      {showTemplateModal && (
+        <OrgTemplateModal
+          onClose={() => setShowTemplateModal(false)}
+          onCreate={handleCreate}
+          creating={creatingOrg}
+        />
       )}
 
       <div style={{ flex: 1, overflow: 'auto' }}>
