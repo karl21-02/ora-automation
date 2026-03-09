@@ -12,27 +12,42 @@ interface OrgSwitcherProps {
 export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew }: OrgSwitcherProps) {
   const [open, setOpen] = useState(false)
   const [focusedIndex, setFocusedIndex] = useState(-1)
+  const [searchQuery, setSearchQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   const current = orgs.find(o => o.id === currentOrgId)
 
-  // Build list of selectable options: [null (unclassified), ...org ids, 'create' if onCreateNew]
+  // Filter orgs based on search query
+  const filteredOrgs = useMemo(() => {
+    if (!searchQuery.trim()) return orgs
+    const q = searchQuery.toLowerCase()
+    return orgs.filter(o => o.name.toLowerCase().includes(q))
+  }, [orgs, searchQuery])
+
+  // Build list of selectable options: [null (unclassified), ...filtered org ids, 'create' if onCreateNew]
   const options = useMemo(() => {
-    const list: (string | null)[] = [null, ...orgs.map(o => o.id)]
+    const list: (string | null)[] = [null, ...filteredOrgs.map(o => o.id)]
     if (onCreateNew) list.push('__create__')
     return list
-  }, [orgs, onCreateNew])
+  }, [filteredOrgs, onCreateNew])
 
-  // Reset focus when dropdown opens/closes
+  // Reset focus and search when dropdown opens/closes
   useEffect(() => {
     if (open) {
       // Focus on current selection
       const idx = options.indexOf(currentOrgId)
       setFocusedIndex(idx >= 0 ? idx : 0)
+      setSearchQuery('')
+      // Focus search input when dropdown opens (if many orgs)
+      if (orgs.length > 5) {
+        setTimeout(() => searchInputRef.current?.focus(), 50)
+      }
     } else {
       setFocusedIndex(-1)
+      setSearchQuery('')
     }
-  }, [open, currentOrgId, options])
+  }, [open, currentOrgId, options, orgs.length])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -114,6 +129,21 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
 
       {open && (
         <div style={dropdownStyle} role="listbox">
+          {/* Search input (only show if many orgs) */}
+          {orgs.length > 5 && (
+            <div style={searchContainerStyle}>
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="조직 검색..."
+                style={searchInputStyle}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
+
           {/* Unclassified option */}
           <button
             onClick={() => { onSelect(null); setOpen(false) }}
@@ -131,10 +161,10 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
             <span style={{ color: '#6b7280' }}>📎 미분류 (기본 프리셋)</span>
           </button>
 
-          {orgs.length > 0 && <div style={dividerStyle} />}
+          {filteredOrgs.length > 0 && <div style={dividerStyle} />}
 
           {/* Org list */}
-          {orgs.map((org, idx) => {
+          {filteredOrgs.map((org, idx) => {
             const optionIdx = getOptionIndex(org.id)
             const isFocused = focusedIndex === optionIdx
             const isSelected = currentOrgId === org.id
@@ -166,10 +196,17 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
             </div>
           )}
 
+          {/* No search results */}
+          {searchQuery && filteredOrgs.length === 0 && orgs.length > 0 && (
+            <div style={emptyHintStyle}>
+              "{searchQuery}"에 해당하는 조직이 없습니다
+            </div>
+          )}
+
           {/* Create new option */}
           {onCreateNew && (
             <>
-              {orgs.length > 0 && <div style={dividerStyle} />}
+              {filteredOrgs.length > 0 && <div style={dividerStyle} />}
               <button
                 onClick={() => { onCreateNew(); setOpen(false) }}
                 style={{
@@ -289,4 +326,19 @@ const keyboardHintStyle: React.CSSProperties = {
   textAlign: 'center',
   borderTop: '1px solid #f3f4f6',
   marginTop: 4,
+}
+
+const searchContainerStyle: React.CSSProperties = {
+  padding: '8px 8px 4px',
+  borderBottom: '1px solid #f3f4f6',
+}
+
+const searchInputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '6px 10px',
+  borderRadius: 6,
+  border: '1px solid #e5e7eb',
+  fontSize: 13,
+  outline: 'none',
+  boxSizing: 'border-box',
 }
