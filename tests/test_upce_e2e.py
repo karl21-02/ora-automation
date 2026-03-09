@@ -22,6 +22,7 @@ from ora_automation_api.dialog_engine import (
     run_stage1,
     run_stage2_sync,
 )
+from ora_automation_api.exceptions import LLMConnectionError
 from ora_automation_api.schemas import ChatPlan, ProjectInfo
 
 from conftest import MOCK_PROJECTS, make_stage1_response, make_stage2_chunks
@@ -285,7 +286,7 @@ class TestRunStage1:
 
     @patch("ora_automation_api.dialog_engine._call_gemini_json")
     def test_gemini_failure_fallback(self, mock_gemini):
-        mock_gemini.side_effect = RuntimeError("GOOGLE_CLOUD_PROJECT_ID not set")
+        mock_gemini.side_effect = LLMConnectionError("GOOGLE_CLOUD_PROJECT_ID not set")
 
         ctx = DialogContext()
         result = run_stage1("아무 말이나", [], ctx, MOCK_PROJECTS)

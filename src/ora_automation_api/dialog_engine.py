@@ -15,6 +15,7 @@ from urllib import error, request
 
 from pydantic import BaseModel, Field
 
+from .exceptions import LLMConnectionError, LLMParseError, LLMTimeoutError
 from .plan_utils import ALLOWED_ENV_KEYS, ALLOWED_TARGETS, coerce_plan as _coerce_plan
 from ora_rd_orchestrator.gemini_provider import _get_gemini_token, _get_ssl_context, _urlopen
 
@@ -218,7 +219,7 @@ def _call_gemini_json(system_prompt: str, contents: list[dict]) -> dict:
             payload = json.loads(raw)
             candidates = payload.get("candidates", [])
             if not isinstance(candidates, list) or not candidates:
-                raise RuntimeError("Gemini response missing candidates")
+                raise LLMParseError("Gemini response missing candidates")
             parts = candidates[0].get("content", {}).get("parts", [])
             texts: list[str] = []
             if isinstance(parts, list):
@@ -228,17 +229,19 @@ def _call_gemini_json(system_prompt: str, contents: list[dict]) -> dict:
             text = "\n".join(texts).strip()
             return json.loads(text)
         except json.JSONDecodeError as exc:
-            last_error = RuntimeError(f"Gemini JSON parse error: {exc}")
+            last_error = LLMParseError(f"Gemini JSON parse error: {exc}")
             continue
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")
-            last_error = RuntimeError(f"Gemini HTTP {exc.code} at {location}: {detail[:600]}")
+            last_error = LLMConnectionError(f"Gemini HTTP {exc.code} at {location}: {detail[:600]}")
             continue
+        except (LLMParseError, LLMConnectionError):
+            raise
         except Exception as exc:
-            last_error = exc
+            last_error = LLMConnectionError(f"Gemini call failed: {exc}")
             continue
 
-    raise last_error or RuntimeError("All Gemini locations failed")
+    raise last_error or LLMConnectionError("All Gemini locations failed")
 
 
 # ── Stage 1: Understanding ────────────────────────────────────────────
@@ -385,7 +388,7 @@ def run_stage1(
     try:
         raw = _call_gemini_json(system_prompt, contents)
         classification = IntentClassification.model_validate(raw)
-    except Exception as exc:
+    except (LLMParseError, LLMConnectionError, LLMTimeoutError, ValueError) as exc:
         logger.warning("Stage 1 classification failed, falling back to UNCLEAR: %s", exc)
         classification = IntentClassification(
             intent=IntentType.UNCLEAR,
@@ -739,13 +742,15 @@ def _stream_gemini_stage2(system_prompt: str, contents: list[dict]) -> Generator
             return
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")
-            last_error = RuntimeError(f"Gemini HTTP {exc.code} at {location}: {detail[:600]}")
+            last_error = LLMConnectionError(f"Gemini HTTP {exc.code} at {location}: {detail[:600]}")
             continue
+        except LLMConnectionError:
+            raise
         except Exception as exc:
-            last_error = exc
+            last_error = LLMConnectionError(f"Gemini stream failed: {exc}")
             continue
 
-    raise last_error or RuntimeError("All Gemini locations failed")
+    raise last_error or LLMConnectionError("All Gemini locations failed")
 
 
 def run_stage2_sync(

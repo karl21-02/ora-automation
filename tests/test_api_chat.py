@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from ora_automation_api.exceptions import LLMConnectionError
 from conftest import MOCK_PROJECTS, make_stage1_response, make_stage2_chunks
 
 
@@ -207,7 +208,7 @@ class TestChatGeminiFailureFallback:
     @patch("ora_automation_api.dialog_engine._call_gemini_json")
     def test_chat_gemini_failure_fallback(self, mock_s1, mock_s2, client):
         # Stage 1 fails → UNCLEAR fallback, stage 2 still produces text
-        mock_s1.side_effect = RuntimeError("Connection failed")
+        mock_s1.side_effect = LLMConnectionError("Connection failed")
         mock_s2.return_value = make_stage2_chunks("죄송합니다, 다시 시도해주세요.")
 
         resp = _chat(client, "리서치 하고 싶어")

@@ -23,6 +23,7 @@ from ora_automation_api.dialog_engine import (
     run_stage1,
     run_stage2_stream,
 )
+from ora_automation_api.exceptions import LLMParseError, LLMTimeoutError
 from ora_automation_api.chat_router import (
     StaleDialogError,
     _get_dialog_context,
@@ -41,7 +42,7 @@ class TestStage1JSONParseError:
     @patch("ora_automation_api.dialog_engine._call_gemini_json")
     def test_stage1_json_parse_error(self, mock_gemini):
         """Invalid JSON from Gemini → UNCLEAR fallback."""
-        mock_gemini.side_effect = RuntimeError("Gemini JSON parse error: Expecting value")
+        mock_gemini.side_effect = LLMParseError("Gemini JSON parse error: Expecting value")
 
         ctx = DialogContext()
         result = run_stage1("테스트", [], ctx, MOCK_PROJECTS)
@@ -55,7 +56,7 @@ class TestStage1Timeout:
     @patch("ora_automation_api.dialog_engine._call_gemini_json")
     def test_stage1_timeout(self, mock_gemini):
         """Timeout from Gemini → UNCLEAR fallback."""
-        mock_gemini.side_effect = TimeoutError("Request timed out")
+        mock_gemini.side_effect = LLMTimeoutError("Request timed out")
 
         ctx = DialogContext()
         result = run_stage1("리서치", [], ctx, MOCK_PROJECTS)
