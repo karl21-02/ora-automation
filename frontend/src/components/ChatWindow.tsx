@@ -4,6 +4,7 @@ import { APP_NAME } from '../lib/constants'
 import type { ChatPlan, DialogState, Message, OrchestrationEvent, OrchestrationRun, Organization } from '../types'
 import GuestAgentPicker from './GuestAgentPicker'
 import MessageBubble from './MessageBubble'
+import OrgSwitcher from './OrgSwitcher'
 
 interface Props {
   messages: Message[]
@@ -311,38 +312,20 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
       height: '100%',
     }}>
       {/* Org selector bar */}
-      {orgs.length > 0 && (
-        <div style={{
-          padding: '8px 16px',
-          borderBottom: '1px solid #e5e7eb',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          backgroundColor: '#f9fafb',
-        }}>
-          <span style={{ fontSize: 14 }}>{'\u{1F3E2}'}</span>
-          <select
-            value={orgId ?? ''}
-            onChange={(e) => onChangeOrg(e.target.value || null)}
-            style={{
-              flex: 1,
-              padding: '4px 8px',
-              borderRadius: 6,
-              border: '1px solid #d1d5db',
-              backgroundColor: '#fff',
-              fontSize: 13,
-              color: '#374151',
-              outline: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            <option value="">{'\u{1F4CE}'} 미분류 (기본 프리셋)</option>
-            {orgs.map((org) => (
-              <option key={org.id} value={org.id}>{org.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
+      <div style={{
+        padding: '8px 16px',
+        borderBottom: '1px solid #e5e7eb',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: '#f9fafb',
+      }}>
+        <OrgSwitcher
+          currentOrgId={orgId}
+          orgs={orgs}
+          onSelect={onChangeOrg}
+        />
+      </div>
 
       {/* Messages */}
       <div style={{
