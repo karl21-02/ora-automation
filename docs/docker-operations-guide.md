@@ -1,6 +1,6 @@
 # Ora R&D Automation — Docker 운영 가이드
 
-> **Last updated:** 2026-03-04
+> **Last updated:** 2026-03-09
 > **Scope:** Docker Compose 기반 API + Worker 클러스터의 구성, 실행, 트러블슈팅
 
 ---
@@ -16,7 +16,7 @@
                ▼
 ┌──────────────────────┐      ┌──────────────────────────┐
 │  api  (FastAPI)       │─────▶│  db  (PostgreSQL 16)      │
-│  :8000                │      │  :5432                    │
+│  :8001                │      │  :5432                    │
 │  uvicorn              │      │  ora_automation DB        │
 └──────────┬───────────┘      └──────────────────────────┘
            │ AMQP publish
@@ -88,7 +88,7 @@ API가 `target` 값을 보고 적절한 Worker 역할을 자동 선택합니다:
 |--------|--------|------|------|
 | `db` | `postgres:16-alpine` | 5432 | 실행 이력, 이벤트, 의사결정 저장 |
 | `rabbitmq` | `rabbitmq:3.13-management` | 5672, 15672 | 메시지 큐 + 관리 UI |
-| `api` | `ora-automation` (빌드) | 8000 | REST API 서버 |
+| `api` | `ora-automation` (빌드) | 8001 | REST API 서버 |
 | `worker-ceo` | `ora-automation` (빌드) | - | CEO 역할 작업 처리 |
 | `worker-pm` | `ora-automation` (빌드) | - | PM 역할 작업 처리 |
 | `worker-researcher` | `ora-automation` (빌드) | - | 연구 분석 작업 처리 |
@@ -176,7 +176,7 @@ make api-reset
 
 ```bash
 # 1. Orchestration 생성 (비동기)
-curl -s -X POST http://localhost:8000/api/v1/orchestrations \
+curl -s -X POST http://localhost:8001/api/v1/orchestrations \
   -H "Content-Type: application/json" \
   -d '{
     "user_prompt": "Ora 앱 전략 분석",
@@ -191,13 +191,13 @@ curl -s -X POST http://localhost:8000/api/v1/orchestrations \
 # → { "id": "abc-123-...", "status": "queued", ... }
 
 # 2. 상태 폴링
-curl -s http://localhost:8000/api/v1/orchestrations/{run_id} | python3 -m json.tool
+curl -s http://localhost:8001/api/v1/orchestrations/{run_id} | python3 -m json.tool
 
 # 3. 이벤트 로그 조회
-curl -s http://localhost:8000/api/v1/orchestrations/{run_id}/events | python3 -m json.tool
+curl -s http://localhost:8001/api/v1/orchestrations/{run_id}/events | python3 -m json.tool
 
 # 4. 취소
-curl -s -X POST http://localhost:8000/api/v1/orchestrations/{run_id}/cancel
+curl -s -X POST http://localhost:8001/api/v1/orchestrations/{run_id}/cancel
 ```
 
 ### 3.3 Docker 단독 실행 (API 없이)
@@ -399,7 +399,7 @@ make -n run-cycle  # dry-run으로 커맨드 확인
 |--------|------|---------|
 | PostgreSQL | 5432 | 로컬 PostgreSQL 중지 또는 포트 변경 |
 | RabbitMQ | 5672 / 15672 | 로컬 RabbitMQ 중지 |
-| API | 8000 | `docker-compose.yml`에서 포트 매핑 변경 |
+| API | 8001 | `docker-compose.yml`에서 포트 매핑 변경 |
 
 ---
 
@@ -409,7 +409,7 @@ make -n run-cycle  # dry-run으로 커맨드 확인
 
 - [ ] `google-service-account.json` 파일이 `ora-automation/` 디렉토리에 존재
 - [ ] Docker Desktop 실행 중
-- [ ] 포트 5432, 5672, 8000, 15672 사용 가능
+- [ ] 포트 5432, 5672, 8001, 15672 사용 가능
 - [ ] 디스크 여유 공간 확인 (이미지 빌드 + 리포트 출력)
 
 ### 기동 후
