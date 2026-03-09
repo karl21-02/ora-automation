@@ -56,7 +56,7 @@ services:
       ORA_RD_GEMINI_DISABLE_VERTEX: "0"
       GOOGLE_CLOUD_FALLBACK_LOCATIONS: ${GOOGLE_CLOUD_FALLBACK_LOCATIONS:-us-central1,us-east1,europe-west1}
     ports:
-      - "8000:8000"
+      - "8001:8000"  # Host:Container (8000 often occupied by Docker Desktop)
     depends_on:
       db:
         condition: service_healthy

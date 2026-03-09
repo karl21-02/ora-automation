@@ -28,7 +28,9 @@ COPY src /workspace/Ora/ora-automation/src
 COPY Makefile /workspace/Ora/ora-automation/Makefile
 COPY scripts /workspace/Ora/ora-automation/scripts
 COPY automations /workspace/Ora/ora-automation/automations
-COPY research_reports /workspace/Ora/ora-automation/research_reports
+
+# Create output directory (not copied from host - mounted or created at runtime)
+RUN mkdir -p /workspace/Ora/ora-automation/research_reports/api_runs
 
 # Re-install in editable mode now that src is present
 RUN pip install --no-cache-dir -e .
