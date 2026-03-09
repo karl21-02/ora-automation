@@ -5,11 +5,42 @@
 ## 1. 개요
 
 ### 1.1 목적
+
+**사용자가 등록한 프로젝트 = AI 에이전트의 분석 대상**
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  사용자가        │     │  Control Center │     │  AI 에이전트들이 │
+│  프로젝트 등록   │ ──> │  에서 관리       │ ──> │  분석에 사용     │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+
+  • 로컬 경로 추가        • 프로젝트 목록        • R&D 분석
+  • GitHub 연동          • .env 확인           • 보안 분석
+                        • 활성화/비활성화       • 코드 리뷰
+```
+
+**핵심 기능:**
 - 로컬 워크스페이스 + GitHub 레포를 통합 관리
 - 프로젝트별 환경설정(.env), 분석 이력 조회
-- R&D 분석 대상 프로젝트 중앙 관리
+- AI 에이전트가 분석할 대상 프로젝트 중앙 관리
 
-### 1.2 UI 구조
+### 1.2 사용 시나리오
+
+```
+1. 사용자: Control Center에서 ~/workspace 경로 추가
+   → ora-automation, ora-ai 등 프로젝트 자동 감지
+
+2. 사용자: GitHub App 설치
+   → company-api, data-pipeline 등 레포 동기화
+
+3. 사용자 (채팅): "ora-automation R&D 분석해줘"
+   → AI 에이전트들이 해당 프로젝트 코드 분석
+
+4. 사용자 (채팅): "company-api 보안 취약점 찾아줘"
+   → GitHub에서 clone → AI 에이전트들이 분석
+```
+
+### 1.3 UI 구조
 
 ```
 ┌────────────┬─────────────┬──────────────────────────────┐
@@ -30,7 +61,7 @@
      60px        220px              나머지
 ```
 
-### 1.3 핵심 기능
+### 1.4 주요 구성요소
 1. **Sources 관리**: 로컬 경로 + GitHub 연동
 2. **Projects 목록**: 통합 프로젝트 리스트
 3. **Project Detail**: 상세 정보 + .env + 분석 이력
@@ -978,3 +1009,168 @@ GITHUB_APP_NAME=ora-automation
 ### 9.4 프론트엔드 테스트
 - TypeScript 타입 체크
 - 컴포넌트 렌더링 테스트
+
+---
+
+## 10. 기존 서비스 연동
+
+### 10.1 연동 아키텍처
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        현재 흐름                                 │
+├─────────────────────────────────────────────────────────────────┤
+│  사용자 (채팅)                                                   │
+│       │                                                         │
+│       ▼                                                         │
+│  Dialog Engine ──> ORA_PROJECTS_ROOT 스캔 ──> 프로젝트 선택      │
+│       │                      (하드코딩)                          │
+│       ▼                                                         │
+│  Orchestration Pipeline ──> workspace.py ──> 분석 실행           │
+└─────────────────────────────────────────────────────────────────┘
+
+                            ⬇️ 변경 후
+
+┌─────────────────────────────────────────────────────────────────┐
+│                        새로운 흐름                               │
+├─────────────────────────────────────────────────────────────────┤
+│  사용자 (채팅)                                                   │
+│       │                                                         │
+│       ▼                                                         │
+│  Dialog Engine ──> projects 테이블 검색 ──> 프로젝트 선택        │
+│       │              (로컬 + GitHub 통합)                        │
+│       ▼                                                         │
+│  Project Service ──> ensure_local_path() ──> clone if needed    │
+│       │                                                         │
+│       ▼                                                         │
+│  Orchestration Pipeline ──> project.local_path ──> 분석 실행    │
+│       │                                                         │
+│       ▼                                                         │
+│  분석 완료 ──> OrchestrationRun.project_id 저장 ──> 이력 연결    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 10.2 수정 대상 파일
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `dialog_engine.py` | 프로젝트 검색을 DB 기반으로 변경 |
+| `service.py` | `ensure_local_path()` 호출 추가 |
+| `workspace.py` | `project.local_path` 사용 |
+| `models.py` | `OrchestrationRun`에 `project_id` 필드 추가 |
+| `schemas.py` | 프로젝트 관련 스키마 추가 |
+
+### 10.3 OrchestrationRun 모델 확장
+
+```python
+class OrchestrationRun(Base):
+    # ... 기존 필드 ...
+
+    # NEW: 프로젝트 연결
+    project_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("projects.id", ondelete="SET NULL")
+    )
+
+    # 관계
+    project: Mapped["Project | None"] = relationship()
+```
+
+### 10.4 Dialog Engine 수정
+
+```python
+# dialog_engine.py
+
+async def get_available_projects(db: Session) -> list[dict]:
+    """사용 가능한 프로젝트 목록 (기존: 파일시스템 스캔 → 변경: DB 조회)"""
+    projects = db.query(Project).filter(Project.enabled == True).all()
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "source_type": p.source_type,  # "local" | "github" | "github_only"
+            "language": p.language,
+            "icon": "📁" if p.source_type == "local" else "🐙",
+        }
+        for p in projects
+    ]
+
+
+async def resolve_project_target(project_id: str, db: Session) -> str:
+    """분석 대상 경로 확보 (필요시 clone)"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise ValueError("Project not found")
+
+    local_path = await ensure_local_path(project, db)
+    return local_path
+```
+
+### 10.5 채팅 프로젝트 선택 UI
+
+```
+사용자: "R&D 분석해줘"
+
+Ora: 어떤 프로젝트를 분석할까요?
+
+     📁 ora-automation          Python • local
+     📁 ora-ai-server           TypeScript • local
+     🐙 company-api             Go • github
+     🐙 data-pipeline           Python • github
+
+     [검색...]
+```
+
+### 10.6 분석 이력 연결
+
+```python
+# service.py - create_run() 수정
+
+async def create_run(
+    plan: ChatPlan,
+    prompt: str,
+    org_id: str | None = None,
+    project_id: str | None = None,  # NEW
+    db: Session = ...,
+) -> OrchestrationRun:
+    run = OrchestrationRun(
+        id=uuid4().hex,
+        target=plan.target,
+        project_id=project_id,  # NEW: 프로젝트 연결
+        # ... 나머지 ...
+    )
+    db.add(run)
+    db.commit()
+    return run
+```
+
+### 10.7 Control Center에서 이력 조회
+
+```python
+# projects_router.py
+
+@router.get("/{project_id}/history")
+def get_project_history(
+    project_id: str,
+    limit: int = Query(default=20, le=100),
+    db: Session = Depends(get_db),
+) -> list[AnalysisHistoryItem]:
+    """프로젝트의 분석 이력 조회"""
+    runs = (
+        db.query(OrchestrationRun)
+        .filter(OrchestrationRun.project_id == project_id)
+        .order_by(OrchestrationRun.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        AnalysisHistoryItem(
+            id=r.id,
+            run_type=r.target,
+            status=r.status,
+            started_at=r.created_at,
+            completed_at=r.completed_at,
+            report_path=r.report_path,
+        )
+        for r in runs
+    ]
+```
