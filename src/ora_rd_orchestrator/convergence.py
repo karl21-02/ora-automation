@@ -241,6 +241,39 @@ def _apply_score_updates(
                 working_scores[tid][key] = max(0.0, min(10.0, new_val))
 
 
+def _filter_scores_by_agents(
+    topic_ids: list[str],
+    agent_ids: list[str],
+    source_scores: dict[str, dict[str, float]],
+    default: float | None = None,
+) -> dict[str, dict[str, float]]:
+    """Filter source scores to only include specified agents.
+
+    Args:
+        topic_ids: List of topic IDs to process
+        agent_ids: List of agent IDs to include
+        source_scores: Source scores {topic_id: {agent_key: score}}
+        default: Default score if agent key not in source. If None, skip missing keys.
+
+    Returns:
+        Filtered scores dict {topic_id: {agent_key: score}}
+    """
+    from .report_builder import _agent_score_key
+
+    result: dict[str, dict[str, float]] = {}
+    for tid in topic_ids:
+        per_topic: dict[str, float] = {}
+        topic_scores = source_scores.get(tid, {})
+        for aid in agent_ids:
+            key = _agent_score_key(aid)
+            if default is not None:
+                per_topic[key] = topic_scores.get(key, default)
+            elif key in topic_scores:
+                per_topic[key] = topic_scores[key]
+        result[tid] = per_topic
+    return result
+
+
 def _run_deliberation_loop(
     working_scores: dict[str, dict[str, float]],
     agent_ids: list[str],
@@ -321,18 +354,7 @@ def _run_chapter_deliberation(
     threshold: float,
 ) -> dict:
     """Run deliberation within a single chapter until convergence."""
-    from .report_builder import _agent_score_key
-
-    # Filter scores to only this chapter's agents
-    working_scores: dict[str, dict[str, float]] = {}
-    for tid in topic_ids:
-        per_topic: dict[str, float] = {}
-        full_topic_scores = initial_scores.get(tid, {})
-        for aid in agent_ids:
-            key = _agent_score_key(aid)
-            if key in full_topic_scores:
-                per_topic[key] = full_topic_scores[key]
-        working_scores[tid] = per_topic
+    working_scores = _filter_scores_by_agents(topic_ids, agent_ids, initial_scores)
 
     # Run deliberation loop
     final_scores, rounds_executed, converged, discussion = _run_deliberation_loop(
@@ -366,18 +388,7 @@ def _run_clevel_scoring(
     agent_definitions: dict,
 ) -> dict[str, dict[str, float]]:
     """Extract C-Level agent scores from initial_scores."""
-    from .report_builder import _agent_score_key
-
-    result: dict[str, dict[str, float]] = {}
-    for tid in topic_ids:
-        per_topic: dict[str, float] = {}
-        full_topic_scores = initial_scores.get(tid, {})
-        for aid in clevel_agent_ids:
-            key = _agent_score_key(aid)
-            if key in full_topic_scores:
-                per_topic[key] = full_topic_scores[key]
-        result[tid] = per_topic
-    return result
+    return _filter_scores_by_agents(topic_ids, clevel_agent_ids, initial_scores)
 
 
 def _run_silo_deliberation(
@@ -395,8 +406,6 @@ def _run_silo_deliberation(
     threshold: float,
 ) -> dict:
     """Run deliberation among chapter representatives within a silo."""
-    from .report_builder import _agent_score_key
-
     # Collect representative agent IDs (first agent from each chapter)
     rep_agents: list[str] = []
     silo_chapter_results = [cr for cr in chapter_results if cr["chapter_id"] in chapter_ids]
@@ -418,14 +427,9 @@ def _run_silo_deliberation(
 
     # Build working scores from chapter results
     merged_chapter_scores = _aggregate_chapter_scores(silo_chapter_results)
-    working_scores: dict[str, dict[str, float]] = {}
-    for tid in topic_ids:
-        per_topic: dict[str, float] = {}
-        ch_scores = merged_chapter_scores.get(tid, {})
-        for aid in rep_agents:
-            key = _agent_score_key(aid)
-            per_topic[key] = ch_scores.get(key, 5.0)
-        working_scores[tid] = per_topic
+    working_scores = _filter_scores_by_agents(
+        topic_ids, rep_agents, merged_chapter_scores, default=5.0
+    )
 
     # Run deliberation loop
     final_scores, rounds_executed, converged, discussion = _run_deliberation_loop(
