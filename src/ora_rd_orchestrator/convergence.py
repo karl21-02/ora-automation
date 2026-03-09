@@ -215,20 +215,22 @@ def _aggregate_chapter_scores(
 
 def _build_mock_topic_catalog(topic_ids: list[str]) -> dict[str, Any]:
     """Build minimal TopicState-like objects for decision parsing."""
+    from types import SimpleNamespace
+
     catalog: dict[str, Any] = {}
     for tid in topic_ids:
-        catalog[tid] = type("_TS", (), {
-            "topic_name": tid,
-            "evidence": [],
-            "project_hits": {},
-            "compute_features": lambda self=None: {},
-            "keyword_hits": 0,
-            "business_hits": 0,
-            "novelty_hits": 0,
-            "code_hits": 0,
-            "doc_hits": 0,
-            "history_hits": 0,
-        })()
+        catalog[tid] = SimpleNamespace(
+            topic_name=tid,
+            evidence=[],
+            project_hits={},
+            compute_features=lambda: {},
+            keyword_hits=0,
+            business_hits=0,
+            novelty_hits=0,
+            code_hits=0,
+            doc_hits=0,
+            history_hits=0,
+        )
     return catalog
 
 
@@ -940,8 +942,8 @@ def run_convergence_pipeline(
     if progress_callback:
         try:
             progress_callback("convergence", "Starting 3-level convergence pipeline")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Progress callback failed: %s", exc)
 
     result = graph.invoke(initial_state)
 
