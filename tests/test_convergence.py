@@ -8,6 +8,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Check if langgraph is available (optional dependency)
+try:
+    import langgraph  # noqa: F401
+    HAS_LANGGRAPH = True
+except ImportError:
+    HAS_LANGGRAPH = False
+
+requires_langgraph = pytest.mark.skipif(
+    not HAS_LANGGRAPH,
+    reason="langgraph not installed"
+)
+
 from ora_rd_orchestrator.convergence import (
     _aggregate_chapter_scores,
     _build_ranked_from_scores,
@@ -499,6 +511,7 @@ class TestLevel3Node:
 # TestConvergenceGraph
 # ---------------------------------------------------------------------------
 
+@requires_langgraph
 class TestConvergenceGraph:
     def test_graph_compiles(self):
         from ora_rd_orchestrator.convergence import build_convergence_graph
@@ -656,6 +669,7 @@ class TestPipelineIntegration:
 # TestRunConvergencePipeline (entry point)
 # ---------------------------------------------------------------------------
 
+@requires_langgraph
 class TestRunConvergencePipeline:
     @patch("ora_rd_orchestrator.deliberation.llm_deliberation_round")
     def test_returns_convergence_state(self, mock_llm):
