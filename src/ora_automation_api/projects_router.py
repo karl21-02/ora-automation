@@ -23,7 +23,7 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
+router = APIRouter(prefix="/api/v1/unified-projects", tags=["projects"])
 
 
 # ── GET /projects ────────────────────────────────────────────────────────
