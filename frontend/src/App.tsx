@@ -7,6 +7,7 @@ import SettingsPanel from './components/SettingsPanel'
 import Sidebar from './components/Sidebar'
 import { createConversation, deleteConversation, getConversation, listConversations, listOrgs, renameConversation, updateConversationOrg } from './lib/api'
 import { useKeyboardShortcuts } from './lib/hooks/useKeyboardShortcuts'
+import { useRunningCount } from './lib/hooks/useRunningCount'
 import { useSidebarState } from './lib/hooks/useSidebarState'
 import { MENU_ITEMS, type MenuId } from './lib/sidebarConfig'
 import type { Conversation, Message, Organization } from './types'
@@ -33,6 +34,7 @@ export default function App() {
   const [orgs, setOrgs] = useState<Organization[]>([])
   const { isCollapsed, toggle: toggleSidebar } = useSidebarState()
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const runningCount = useRunningCount()
 
   const refreshOrgs = useCallback(() => {
     listOrgs().then(({ items }) => setOrgs(items)).catch(() => setOrgs([]))
@@ -267,6 +269,7 @@ export default function App() {
         isCollapsed={isCollapsed}
         onToggle={toggleSidebar}
         searchInputRef={searchInputRef}
+        badges={{ scheduler: runningCount }}
       />
       {activeMenu === 'chats' && (
         <ChatWindow

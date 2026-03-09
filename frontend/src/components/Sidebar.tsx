@@ -20,6 +20,7 @@ interface Props {
   isCollapsed: boolean
   onToggle: () => void
   searchInputRef: RefObject<HTMLInputElement | null>
+  badges?: Partial<Record<MenuId, number>>
 }
 
 export default function Sidebar({
@@ -36,6 +37,7 @@ export default function Sidebar({
   isCollapsed,
   onToggle,
   searchInputRef,
+  badges = {},
 }: Props) {
   const handleMenuClick = (menuId: MenuId) => {
     onMenuChange(menuId)
@@ -60,6 +62,7 @@ export default function Sidebar({
             isActive={activeMenu === item.id}
             isCollapsed={isCollapsed}
             onClick={() => handleMenuClick(item.id as MenuId)}
+            badge={badges[item.id as MenuId]}
           />
         ))}
       </nav>
@@ -91,6 +94,7 @@ export default function Sidebar({
             isActive={activeMenu === item.id}
             isCollapsed={isCollapsed}
             onClick={() => handleMenuClick(item.id as MenuId)}
+            badge={badges[item.id as MenuId]}
           />
         ))}
       </div>
