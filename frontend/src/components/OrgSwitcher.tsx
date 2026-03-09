@@ -184,6 +184,7 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
                   {isSelected && <Check size={14} color="#2563eb" />}
                 </span>
                 <span style={{ flex: 1 }}>{org.name}</span>
+                <span style={agentCountBadge}>{org.agent_count}</span>
                 {org.is_preset && <span style={presetBadgeSmall}>Preset</span>}
               </button>
             )
@@ -341,4 +342,13 @@ const searchInputStyle: React.CSSProperties = {
   fontSize: 13,
   outline: 'none',
   boxSizing: 'border-box',
+}
+
+const agentCountBadge: React.CSSProperties = {
+  fontSize: 10,
+  padding: '1px 6px',
+  borderRadius: 10,
+  backgroundColor: '#f3f4f6',
+  color: '#6b7280',
+  fontWeight: 500,
 }

@@ -451,6 +451,7 @@ class OrganizationRead(BaseModel):
     flat_mode_agents: list
     agent_final_weights: dict
     pipeline_params: dict = Field(default_factory=dict)
+    agent_count: int = Field(default=0, description="Number of agents in this organization")
     created_at: datetime
     updated_at: datetime
 

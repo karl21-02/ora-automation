@@ -201,6 +201,7 @@ export interface Organization {
   flat_mode_agents: string[]
   agent_final_weights: Record<string, number>
   pipeline_params: Record<string, unknown>
+  agent_count: number
   created_at: string
   updated_at: string
 }

@@ -58,10 +58,17 @@ def list_orgs(
     db: Session = Depends(get_db),
 ) -> OrganizationList:
     orgs = db.query(Organization).order_by(Organization.name).limit(limit).all()
-    return OrganizationList(
-        items=[OrganizationRead.model_validate(o) for o in orgs],
-        total=len(orgs),
-    )
+    # Count agents for each org
+    agent_counts: dict[str, int] = {}
+    for org in orgs:
+        count = db.query(OrganizationAgent).filter(OrganizationAgent.org_id == org.id).count()
+        agent_counts[org.id] = count
+    items = []
+    for org in orgs:
+        org_data = OrganizationRead.model_validate(org)
+        org_data.agent_count = agent_counts.get(org.id, 0)
+        items.append(org_data)
+    return OrganizationList(items=items, total=len(orgs))
 
 
 @router.post("", response_model=OrganizationDetail, status_code=201)
