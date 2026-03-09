@@ -58,10 +58,8 @@ def _try_auto_publish_notion(run_id: str, db: Session) -> None:
         job = db.scalar(
             select(ScheduledJob).where(ScheduledJob.last_run_id == run_id)
         )
-        if job and job.auto_publish_notion:
-            from .notion_publisher import auto_publish_latest_report
-            auto_publish_latest_report(run_id, db)
-        elif settings.notion_auto_publish:
+        should_publish = (job and job.auto_publish_notion) or settings.notion_auto_publish
+        if should_publish:
             from .notion_publisher import auto_publish_latest_report
             auto_publish_latest_report(run_id, db)
     except Exception as exc:
