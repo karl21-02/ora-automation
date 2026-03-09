@@ -14,7 +14,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import Organization, OrganizationAgent, OrganizationChapter, OrganizationSilo, OrchestrationDecision, OrchestrationEvent, OrchestrationRun
+from .models import GithubRepo, Organization, OrganizationAgent, OrganizationChapter, OrganizationSilo, OrchestrationDecision, OrchestrationEvent, OrchestrationRun, Project
 from .queue import AgentRole, pick_agent_role
 from .schemas import DecisionCreate, OrchestrationRunCreate
 
@@ -589,6 +589,85 @@ def _merge_guest_agents(org_config: dict | None, guest_agents: list[dict]) -> di
 
 
 # ---------------------------------------------------------------------------
+# Project preparation (github_only -> local clone)
+# ---------------------------------------------------------------------------
+
+async def _prepare_project_if_needed(db: Session, project_id: str) -> Path | None:
+    """Prepare a project's local path if it's a github_only project.
+
+    Args:
+        db: Database session
+        project_id: Project ID to prepare
+
+    Returns:
+        Local path of the prepared project, or None if not applicable
+    """
+    from .clone_service import ensure_local_clone, is_cloned
+
+    project = db.get(Project, project_id)
+    if not project:
+        logger.warning("Project not found for preparation: %s", project_id)
+        return None
+
+    # If local path exists and is valid, return it
+    if project.local_path:
+        local_path = Path(project.local_path)
+        if local_path.exists():
+            return local_path
+
+    # Need to clone from GitHub
+    if not project.github_repo_id:
+        logger.warning("Project %s has no local path and no GitHub repo", project_id)
+        return None
+
+    github_repo = db.get(GithubRepo, project.github_repo_id)
+    if not github_repo:
+        logger.warning("GitHub repo not found for project %s", project_id)
+        return None
+
+    try:
+        clone_path = await ensure_local_clone(
+            clone_url=github_repo.clone_url,
+            full_name=github_repo.full_name,
+            branch=github_repo.default_branch,
+            force_pull=False,
+        )
+
+        # Update project with local path
+        project.local_path = str(clone_path)
+        if project.source_type == "github_only":
+            project.source_type = "github"
+        db.commit()
+
+        logger.info("Prepared project %s at %s", project_id, clone_path)
+        return clone_path
+    except Exception as exc:
+        logger.error("Failed to prepare project %s: %s", project_id, exc)
+        return None
+
+
+def _prepare_project_sync(db: Session, project_id: str) -> Path | None:
+    """Synchronous wrapper for _prepare_project_if_needed."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Create new loop in a thread
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    asyncio.run,
+                    _prepare_project_if_needed(db, project_id)
+                )
+                return future.result(timeout=120)
+        else:
+            return loop.run_until_complete(_prepare_project_if_needed(db, project_id))
+    except Exception as exc:
+        logger.error("Failed to prepare project sync: %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Execute run (in-process pipeline)
 # ---------------------------------------------------------------------------
 
@@ -660,6 +739,17 @@ def execute_run(
         )
 
         org_config = _load_org_config(db, run.org_id)
+
+        # Prepare project if PROJECT_ID is specified (clone github_only projects)
+        project_id = (run.env or {}).get("PROJECT_ID", "").strip()
+        if project_id:
+            prepared_path = _prepare_project_sync(db, project_id)
+            if prepared_path:
+                _record_event(
+                    db, run.id, "execution", "project_prepared",
+                    f"project prepared at {prepared_path}",
+                    {"project_id": project_id, "local_path": str(prepared_path)},
+                )
 
         # Load and merge guest agents if specified
         if run.guest_agent_ids:
