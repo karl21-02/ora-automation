@@ -21,6 +21,8 @@ interface Props {
   onToggle: () => void
   searchInputRef: RefObject<HTMLInputElement | null>
   badges?: Partial<Record<MenuId, number>>
+  isMobile?: boolean
+  mobileOpen?: boolean
 }
 
 export default function Sidebar({
@@ -38,13 +40,20 @@ export default function Sidebar({
   onToggle,
   searchInputRef,
   badges = {},
+  isMobile = false,
+  mobileOpen = false,
 }: Props) {
   const handleMenuClick = (menuId: MenuId) => {
     onMenuChange(menuId)
   }
 
+  // Build class names
+  const classNames = ['sidebar']
+  if (isCollapsed && !isMobile) classNames.push('collapsed')
+  if (isMobile && mobileOpen) classNames.push('mobile-open')
+
   return (
-    <div className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
+    <div className={classNames.join(' ')}>
       {/* Header */}
       <SidebarHeader
         isCollapsed={isCollapsed}
@@ -60,15 +69,15 @@ export default function Sidebar({
             icon={item.icon}
             label={item.label}
             isActive={activeMenu === item.id}
-            isCollapsed={isCollapsed}
+            isCollapsed={isCollapsed && !isMobile}
             onClick={() => handleMenuClick(item.id as MenuId)}
             badge={badges[item.id as MenuId]}
           />
         ))}
       </nav>
 
-      {/* Content Area (hidden when collapsed) */}
-      {!isCollapsed && activeMenu === 'chats' && (
+      {/* Content Area (hidden when collapsed, but always visible on mobile) */}
+      {(isMobile || !isCollapsed) && activeMenu === 'chats' && (
         <ChatList
           conversations={conversations}
           activeConversationId={activeConversationId}
@@ -80,7 +89,7 @@ export default function Sidebar({
         />
       )}
 
-      {!isCollapsed && activeMenu === 'reports' && (
+      {(isMobile || !isCollapsed) && activeMenu === 'reports' && (
         <ReportList onSelectReport={onSelectReport} />
       )}
 
@@ -92,7 +101,7 @@ export default function Sidebar({
             icon={item.icon}
             label={item.label}
             isActive={activeMenu === item.id}
-            isCollapsed={isCollapsed}
+            isCollapsed={isCollapsed && !isMobile}
             onClick={() => handleMenuClick(item.id as MenuId)}
             badge={badges[item.id as MenuId]}
           />

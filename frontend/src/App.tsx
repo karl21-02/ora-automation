@@ -1,3 +1,4 @@
+import { Menu } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ChatWindow from './components/ChatWindow'
 import OrgPanel from './components/OrgPanel'
@@ -7,6 +8,7 @@ import SettingsPanel from './components/SettingsPanel'
 import Sidebar from './components/Sidebar'
 import { createConversation, deleteConversation, getConversation, listConversations, listOrgs, renameConversation, updateConversationOrg } from './lib/api'
 import { useKeyboardShortcuts } from './lib/hooks/useKeyboardShortcuts'
+import { useIsMobile } from './lib/hooks/useMediaQuery'
 import { useRunningCount } from './lib/hooks/useRunningCount'
 import { useSidebarState } from './lib/hooks/useSidebarState'
 import { MENU_ITEMS, type MenuId } from './lib/sidebarConfig'
@@ -35,6 +37,13 @@ export default function App() {
   const { isCollapsed, toggle: toggleSidebar } = useSidebarState()
   const searchInputRef = useRef<HTMLInputElement>(null)
   const runningCount = useRunningCount()
+  const isMobile = useIsMobile()
+  const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Close mobile sidebar when switching away from mobile view
+  useEffect(() => {
+    if (!isMobile) setMobileOpen(false)
+  }, [isMobile])
 
   const refreshOrgs = useCallback(() => {
     listOrgs().then(({ items }) => setOrgs(items)).catch(() => setOrgs([]))
@@ -248,6 +257,10 @@ export default function App() {
     )
   }
 
+  const handleMobileClose = useCallback(() => {
+    if (isMobile) setMobileOpen(false)
+  }, [isMobile])
+
   return (
     <div style={{
       display: 'flex',
@@ -255,21 +268,38 @@ export default function App() {
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       color: '#1f2937',
     }}>
+      {/* Mobile menu button */}
+      <button
+        className="mobile-menu-btn"
+        onClick={() => setMobileOpen(true)}
+        aria-label="Open menu"
+      >
+        <Menu size={24} />
+      </button>
+
+      {/* Mobile backdrop */}
+      <div
+        className={`sidebar-backdrop ${mobileOpen ? 'visible' : ''}`}
+        onClick={() => setMobileOpen(false)}
+      />
+
       <Sidebar
         conversations={conversations}
         activeConversationId={activeId}
-        onSelectConversation={(id) => { setActiveMenu('chats'); setActiveId(id) }}
-        onNewConversation={(orgId) => { setActiveMenu('chats'); handleNewConversation(orgId) }}
-        onSelectReport={(f) => { setReportFile(f) }}
+        onSelectConversation={(id) => { setActiveMenu('chats'); setActiveId(id); handleMobileClose() }}
+        onNewConversation={(orgId) => { setActiveMenu('chats'); handleNewConversation(orgId); handleMobileClose() }}
+        onSelectReport={(f) => { setReportFile(f); handleMobileClose() }}
         onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}
         activeMenu={activeMenu}
-        onMenuChange={setActiveMenu}
+        onMenuChange={(menu) => { setActiveMenu(menu); handleMobileClose() }}
         orgs={orgs}
         isCollapsed={isCollapsed}
         onToggle={toggleSidebar}
         searchInputRef={searchInputRef}
         badges={{ scheduler: runningCount }}
+        isMobile={isMobile}
+        mobileOpen={mobileOpen}
       />
       {activeMenu === 'chats' && (
         <ChatWindow
