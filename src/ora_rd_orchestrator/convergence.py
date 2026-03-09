@@ -38,6 +38,11 @@ from .report_builder import _agent_score_key
 
 logger = logging.getLogger(__name__)
 
+# Score bounds and defaults
+SCORE_MIN = 0.0
+SCORE_MAX = 10.0
+SCORE_DEFAULT = 5.0
+
 
 # ---------------------------------------------------------------------------
 # LangGraph state schema
@@ -237,7 +242,7 @@ def _apply_score_updates(
             key = _agent_score_key(agent_name)
             if key in working_scores[tid]:
                 new_val = working_scores[tid][key] + delta
-                working_scores[tid][key] = max(0.0, min(10.0, new_val))
+                working_scores[tid][key] = max(SCORE_MIN, min(SCORE_MAX, new_val))
 
 
 def _filter_scores_by_agents(
@@ -423,7 +428,7 @@ def _run_silo_deliberation(
     # Build working scores from chapter results
     merged_chapter_scores = _aggregate_chapter_scores(silo_chapter_results)
     working_scores = _filter_scores_by_agents(
-        topic_ids, rep_agents, merged_chapter_scores, default=5.0
+        topic_ids, rep_agents, merged_chapter_scores, default=SCORE_DEFAULT
     )
 
     # Run deliberation loop
@@ -678,7 +683,7 @@ def level3_node(state: dict) -> dict:
         per_topic.update(clevel_tid)
         # Silo representative scores
         for sr in silo_results:
-            silo_score = sr.get("topic_scores", {}).get(tid, 5.0)
+            silo_score = sr.get("topic_scores", {}).get(tid, SCORE_DEFAULT)
             if isinstance(silo_score, (int, float)):
                 # Use silo_id as pseudo-agent key
                 per_topic[_agent_score_key(f"silo_{sr['silo_id']}")] = float(silo_score)
