@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { createChapter, createSilo, deleteChapter, deleteSilo, updateAgent, updateOrg } from '../lib/api'
 import type { OrgAgent, OrganizationDetail } from '../types'
+import Toast, { type ToastType } from './Toast'
 
 interface Props {
   org: OrganizationDetail
@@ -21,6 +22,13 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
   // Drag & Drop state
   const [draggingAgentId, setDraggingAgentId] = useState<string | null>(null)
   const [dragOverTarget, setDragOverTarget] = useState<string | null>(null) // silo id or 'clevel'
+  const [isDropping, setIsDropping] = useState(false)
+
+  // Toast state
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
+  const showToast = useCallback((message: string, type: ToastType) => {
+    setToast({ message, type })
+  }, [])
 
   // Pipeline settings state
   const pp = org.pipeline_params || {}
@@ -108,13 +116,23 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
     setDragOverTarget(null)
   }
 
-  const handleDropOnSilo = async (e: React.DragEvent, siloId: string) => {
+  const handleDropOnSilo = async (e: React.DragEvent, siloId: string, siloName: string) => {
     e.preventDefault()
     const agentId = e.dataTransfer.getData('agentId')
     if (!agentId) return
     setDragOverTarget(null)
     setDraggingAgentId(null)
-    await handleAssignToSilo(agentId, siloId)
+    setIsDropping(true)
+    showToast('이동 중...', 'loading')
+    try {
+      await updateAgent(org.id, agentId, { silo_id: siloId })
+      await onRefresh()
+      showToast(`${siloName}로 이동 완료`, 'success')
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '이동 실패', 'error')
+    } finally {
+      setIsDropping(false)
+    }
   }
 
   const handleDropOnClevel = async (e: React.DragEvent) => {
@@ -123,12 +141,16 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
     if (!agentId) return
     setDragOverTarget(null)
     setDraggingAgentId(null)
-    setError('')
+    setIsDropping(true)
+    showToast('C-Level로 승격 중...', 'loading')
     try {
       await updateAgent(org.id, agentId, { is_clevel: true, silo_id: null })
       await onRefresh()
+      showToast('C-Level로 승격 완료', 'success')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to promote to C-Level')
+      showToast(err instanceof Error ? err.message : '승격 실패', 'error')
+    } finally {
+      setIsDropping(false)
     }
   }
 
@@ -138,27 +160,35 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
     if (!agentId) return
     setDragOverTarget(null)
     setDraggingAgentId(null)
-    setError('')
+    setIsDropping(true)
+    showToast('배정 해제 중...', 'loading')
     try {
       await updateAgent(org.id, agentId, { is_clevel: false, silo_id: null })
       await onRefresh()
+      showToast('배정 해제 완료', 'success')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to unassign')
+      showToast(err instanceof Error ? err.message : '배정 해제 실패', 'error')
+    } finally {
+      setIsDropping(false)
     }
   }
 
-  const handleDropOnChapter = async (e: React.DragEvent, chapterId: string) => {
+  const handleDropOnChapter = async (e: React.DragEvent, chapterId: string, chapterName: string) => {
     e.preventDefault()
     const agentId = e.dataTransfer.getData('agentId')
     if (!agentId) return
     setDragOverTarget(null)
     setDraggingAgentId(null)
-    setError('')
+    setIsDropping(true)
+    showToast('Chapter 배정 중...', 'loading')
     try {
       await updateAgent(org.id, agentId, { chapter_id: chapterId })
       await onRefresh()
+      showToast(`${chapterName} Chapter로 이동 완료`, 'success')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to assign to chapter')
+      showToast(err instanceof Error ? err.message : 'Chapter 배정 실패', 'error')
+    } finally {
+      setIsDropping(false)
     }
   }
 
@@ -261,9 +291,9 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
             backgroundColor: dragOverTarget === 'clevel' ? '#eff6ff' : 'transparent',
             transition: 'all 0.15s ease',
           }}
-          onDragOver={!readonly ? (e) => handleDragOver(e, 'clevel') : undefined}
-          onDragLeave={!readonly ? handleDragLeave : undefined}
-          onDrop={!readonly ? handleDropOnClevel : undefined}
+          onDragOver={!readonly && !isDropping ? (e) => handleDragOver(e, 'clevel') : undefined}
+          onDragLeave={!readonly && !isDropping ? handleDragLeave : undefined}
+          onDrop={!readonly && !isDropping ? handleDropOnClevel : undefined}
         >
           {clevelAgents.length === 0 && !draggingAgentId && (
             <span style={{ fontSize: 12, color: '#9ca3af' }}>No C-Level agents</span>
@@ -298,9 +328,9 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
               backgroundColor: dragOverTarget === silo.id ? '#eff6ff' : '#fafafa',
               transition: 'all 0.15s ease',
             }}
-            onDragOver={!readonly ? (e) => handleDragOver(e, silo.id) : undefined}
-            onDragLeave={!readonly ? handleDragLeave : undefined}
-            onDrop={!readonly ? (e) => handleDropOnSilo(e, silo.id) : undefined}
+            onDragOver={!readonly && !isDropping ? (e) => handleDragOver(e, silo.id) : undefined}
+            onDragLeave={!readonly && !isDropping ? handleDragLeave : undefined}
+            onDrop={!readonly && !isDropping ? (e) => handleDropOnSilo(e, silo.id, silo.name) : undefined}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <span style={{ fontWeight: 600, fontSize: 13 }}>{silo.name}</span>
@@ -391,9 +421,9 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
               backgroundColor: dragOverTarget === 'unassigned' ? '#eff6ff' : 'transparent',
               transition: 'all 0.15s ease',
             }}
-            onDragOver={!readonly ? (e) => handleDragOver(e, 'unassigned') : undefined}
-            onDragLeave={!readonly ? handleDragLeave : undefined}
-            onDrop={!readonly ? handleDropOnUnassigned : undefined}
+            onDragOver={!readonly && !isDropping ? (e) => handleDragOver(e, 'unassigned') : undefined}
+            onDragLeave={!readonly && !isDropping ? handleDragLeave : undefined}
+            onDrop={!readonly && !isDropping ? handleDropOnUnassigned : undefined}
           >
             {unassignedAgents.length === 0 && draggingAgentId && (
               <span style={{ fontSize: 12, color: '#6b7280' }}>Drop here to unassign</span>
@@ -431,9 +461,9 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
                     backgroundColor: isDropTarget ? '#eff6ff' : '#fafafa',
                     transition: 'all 0.15s ease',
                   }}
-                  onDragOver={!readonly ? (e) => handleDragOver(e, `chapter:${ch.id}`) : undefined}
-                  onDragLeave={!readonly ? handleDragLeave : undefined}
-                  onDrop={!readonly ? (e) => handleDropOnChapter(e, ch.id) : undefined}
+                  onDragOver={!readonly && !isDropping ? (e) => handleDragOver(e, `chapter:${ch.id}`) : undefined}
+                  onDragLeave={!readonly && !isDropping ? handleDragLeave : undefined}
+                  onDrop={!readonly && !isDropping ? (e) => handleDropOnChapter(e, ch.id, ch.name) : undefined}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                     <span style={{ fontSize: 16 }}>{ch.icon}</span>
@@ -525,6 +555,15 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
             )}
           </Section>
         </>
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
       )}
     </div>
   )
