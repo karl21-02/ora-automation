@@ -91,7 +91,7 @@ def client():
     orig_on_startup = list(main_module.app.router.on_startup)
     main_module.app.router.on_startup = []
 
-    with patch.dict(os.environ, {"ORA_CHAT_USE_UPCE": "1"}):
+    with patch.dict(os.environ, {"ORA_CHAT_USE_UPCE": "1", "TESTING": "1"}):
         with patch.object(chat_module, "_scan_projects", return_value=list(MOCK_PROJECTS)):
             with TestClient(main_module.app) as c:
                 yield c

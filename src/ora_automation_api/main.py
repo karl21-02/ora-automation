@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,10 +42,37 @@ from .service import (
 )
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan handler (startup/shutdown)."""
+    # Skip startup logic during testing (conftest.py sets TESTING=1)
+    if os.getenv("TESTING") == "1":
+        yield
+        return
+
+    # ─── Startup ───────────────────────────────────────────────
+    Base.metadata.create_all(bind=engine)
+    _run_ddl_migrations()
+    _seed_preset_org()
+    settings.run_output_dir.mkdir(parents=True, exist_ok=True)
+
+    if settings.scheduler_enabled:
+        from .scheduler import OraScheduler
+        app.state.scheduler = OraScheduler(SessionLocal)
+        app.state.scheduler.start()
+
+    yield
+
+    # ─── Shutdown ──────────────────────────────────────────────
+    if hasattr(app.state, "scheduler"):
+        app.state.scheduler.stop()
+
+
 app = FastAPI(
     title="Ora Automation API",
     version="0.2.0",
     description="FastAPI + Postgres + RabbitMQ orchestration backend for ora-automation",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -554,25 +583,6 @@ def _seed_preset_org() -> None:
         db.rollback()
     finally:
         db.close()
-
-
-@app.on_event("startup")
-def startup() -> None:
-    Base.metadata.create_all(bind=engine)
-    _run_ddl_migrations()
-    _seed_preset_org()
-    settings.run_output_dir.mkdir(parents=True, exist_ok=True)
-
-    if settings.scheduler_enabled:
-        from .scheduler import OraScheduler
-        app.state.scheduler = OraScheduler(SessionLocal)
-        app.state.scheduler.start()
-
-
-@app.on_event("shutdown")
-def shutdown() -> None:
-    if hasattr(app.state, "scheduler"):
-        app.state.scheduler.stop()
 
 
 @app.get("/health")

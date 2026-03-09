@@ -74,8 +74,9 @@ def client():
     orig_on_startup = list(main_module.app.router.on_startup)
     main_module.app.router.on_startup = []
 
-    with TestClient(main_module.app) as c:
-        yield c
+    with patch.dict(os.environ, {"TESTING": "1"}):
+        with TestClient(main_module.app) as c:
+            yield c
 
     main_module.app.dependency_overrides.clear()
     main_module.app.router.on_startup = orig_on_startup
