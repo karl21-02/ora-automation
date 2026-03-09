@@ -219,6 +219,28 @@ def _build_mock_topic_catalog(topic_ids: list[str]) -> dict[str, Any]:
     return catalog
 
 
+def _apply_score_updates(
+    working_scores: dict[str, dict[str, float]],
+    score_updates: dict,
+) -> None:
+    """Apply score deltas with 0-10 clamping (in-place).
+
+    Args:
+        working_scores: Current scores dict {topic_id: {agent_key: score}}
+        score_updates: Updates from LLM {topic_id: {agent_name: delta}}
+    """
+    from .report_builder import _agent_score_key
+
+    for tid, per_agent in score_updates.items():
+        if tid not in working_scores:
+            continue
+        for agent_name, delta in per_agent.items():
+            key = _agent_score_key(agent_name)
+            if key in working_scores[tid]:
+                new_val = working_scores[tid][key] + delta
+                working_scores[tid][key] = max(0.0, min(10.0, new_val))
+
+
 def _run_deliberation_loop(
     working_scores: dict[str, dict[str, float]],
     agent_ids: list[str],
@@ -265,15 +287,7 @@ def _run_deliberation_loop(
             known_agent_ids=set(agent_ids),
         )
 
-        # Apply score updates with bounds clamping
-        for tid, per_agent in score_updates.items():
-            if tid not in working_scores:
-                continue
-            for agent_name, delta in per_agent.items():
-                key = _agent_score_key(agent_name)
-                if key in working_scores[tid]:
-                    new_val = working_scores[tid][key] + delta
-                    working_scores[tid][key] = max(0.0, min(10.0, new_val))
+        _apply_score_updates(working_scores, score_updates)
 
         if summaries:
             discussion.extend(summaries)
@@ -670,7 +684,7 @@ def level3_node(state: dict) -> dict:
             silo_score = sr.get("topic_scores", {}).get(tid, 5.0)
             if isinstance(silo_score, (int, float)):
                 # Use silo_id as pseudo-agent key
-                per_topic[_agent_score_key(sr["silo_id"][:8])] = float(silo_score)
+                per_topic[_agent_score_key(f"silo_{sr['silo_id']}")] = float(silo_score)
         working_scores[tid] = per_topic
 
     topic_catalog = _build_mock_topic_catalog(topic_ids)
@@ -694,14 +708,7 @@ def level3_node(state: dict) -> dict:
         known_agent_ids=set(participants),
     )
 
-    # Apply updates
-    for tid, per_agent in score_updates.items():
-        if tid not in working_scores:
-            continue
-        for agent_name, delta in per_agent.items():
-            key = _agent_score_key(agent_name)
-            if key in working_scores[tid]:
-                working_scores[tid][key] = max(0.0, min(10.0, working_scores[tid][key] + delta))
+    _apply_score_updates(working_scores, score_updates)
 
     decision_dicts = [d.to_dict() for d in decisions] if decisions else []
 
