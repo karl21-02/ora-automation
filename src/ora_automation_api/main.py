@@ -88,13 +88,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from .github_router import router as github_router
 from .notion_router import router as notion_router
 from .org_router import router as org_router
+from .projects_router import router as projects_router
 from .scheduler_router import router as scheduler_router
 
 app.include_router(chat_router)
+app.include_router(github_router)
 app.include_router(notion_router)
 app.include_router(org_router)
+app.include_router(projects_router)
 app.include_router(scheduler_router)
 
 
