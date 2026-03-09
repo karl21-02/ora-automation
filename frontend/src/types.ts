@@ -211,3 +211,69 @@ export interface OrganizationDetail extends Organization {
   silos: OrgSilo[]
   chapters: OrgChapter[]
 }
+
+// ── GitHub Integration ──────────────────────────────────────────────
+
+export interface GithubInstallation {
+  id: string
+  installation_id: number
+  account_type: 'Organization' | 'User'
+  account_login: string
+  account_id: number
+  avatar_url: string | null
+  status: 'active' | 'suspended' | 'deleted'
+  installed_at: string
+  synced_at: string | null
+  repos_count?: number
+}
+
+export interface GithubRepo {
+  id: string
+  installation_id: string
+  repo_id: number
+  name: string
+  full_name: string
+  description: string | null
+  html_url: string
+  clone_url: string
+  default_branch: string
+  language: string | null
+  stars: number
+  is_private: boolean
+  synced_at: string
+}
+
+// ── Unified Projects ──────────────────────────────────────────────
+
+export interface UnifiedProject {
+  id: string
+  name: string
+  description: string | null
+  source_type: 'local' | 'github' | 'github_only'
+  local_path: string | null
+  github_repo_id: string | null
+  enabled: boolean
+  last_analyzed_at: string | null
+  analysis_count: number
+  language: string | null
+  default_branch: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectList {
+  items: UnifiedProject[]
+  total: number
+}
+
+export interface LocalScanResult {
+  created: number
+  updated: number
+  unchanged: number
+}
+
+export interface ProjectPrepareResponse {
+  project_id: string
+  local_path: string
+  cloned: boolean
+}
