@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
+import { Tooltip } from './Tooltip'
 
 interface SidebarItemProps {
   icon: LucideIcon
@@ -6,6 +7,7 @@ interface SidebarItemProps {
   isActive: boolean
   isCollapsed: boolean
   onClick: () => void
+  badge?: number | null
 }
 
 export function SidebarItem({
@@ -14,17 +16,26 @@ export function SidebarItem({
   isActive,
   isCollapsed,
   onClick,
+  badge,
 }: SidebarItemProps) {
-  return (
+  const button = (
     <button
       onClick={onClick}
       className={`sidebar-nav-item ${isActive ? 'active' : ''}`}
-      title={isCollapsed ? label : undefined}
     >
       <span className="nav-icon">
         <Icon size={20} />
+        {badge != null && badge > 0 && (
+          <span className="nav-badge">{badge > 99 ? '99+' : badge}</span>
+        )}
       </span>
       <span className="nav-label">{label}</span>
     </button>
+  )
+
+  return (
+    <Tooltip content={label} disabled={!isCollapsed}>
+      {button}
+    </Tooltip>
   )
 }
