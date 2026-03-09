@@ -240,19 +240,43 @@ _PROJECT_CACHE_TTL = 60.0  # seconds
 _cache_lock = threading.Lock()
 
 
-def _scan_projects() -> list[ProjectInfo]:
-    global _project_cache, _project_cache_time
-    now = time.monotonic()
-    with _cache_lock:
-        if _project_cache is not None and now - _project_cache_time < _PROJECT_CACHE_TTL:
-            return _project_cache
+def _scan_projects_from_db(db: Session | None = None) -> list[ProjectInfo]:
+    """Load projects from unified projects table."""
+    from .models import Project
 
+    close_session = False
+    if db is None:
+        db = SessionLocal()
+        close_session = True
+
+    try:
+        projects_db = db.query(Project).filter(Project.enabled == True).order_by(Project.name).all()
+        projects: list[ProjectInfo] = []
+        for p in projects_db:
+            local_path = Path(p.local_path) if p.local_path else None
+            projects.append(ProjectInfo(
+                id=p.id,
+                name=p.name,
+                path=p.local_path or "",
+                has_makefile=local_path.joinpath("Makefile").is_file() if local_path and local_path.exists() else False,
+                has_dockerfile=(
+                    local_path.joinpath("Dockerfile").is_file() or local_path.joinpath("docker-compose.yml").is_file()
+                ) if local_path and local_path.exists() else False,
+                description=p.description or "",
+                source_type=p.source_type,
+                language=p.language,
+            ))
+        return projects
+    finally:
+        if close_session:
+            db.close()
+
+
+def _scan_projects_from_filesystem() -> list[ProjectInfo]:
+    """Fallback: scan projects from filesystem."""
     root = settings.projects_root
     if not root.is_dir():
-        with _cache_lock:
-            _project_cache = []
-            _project_cache_time = time.monotonic()
-            return _project_cache
+        return []
     projects: list[ProjectInfo] = []
     for entry in sorted(root.iterdir()):
         if not entry.is_dir():
@@ -266,6 +290,30 @@ def _scan_projects() -> list[ProjectInfo]:
             has_makefile=(entry / "Makefile").is_file(),
             has_dockerfile=(entry / "Dockerfile").is_file() or (entry / "docker-compose.yml").is_file(),
         ))
+    return projects
+
+
+def _scan_projects() -> list[ProjectInfo]:
+    """Get projects - prefer DB, fallback to filesystem."""
+    global _project_cache, _project_cache_time
+    now = time.monotonic()
+    with _cache_lock:
+        if _project_cache is not None and now - _project_cache_time < _PROJECT_CACHE_TTL:
+            return _project_cache
+
+    # Try loading from database first
+    try:
+        projects = _scan_projects_from_db()
+        if projects:
+            with _cache_lock:
+                _project_cache = projects
+                _project_cache_time = time.monotonic()
+            return projects
+    except Exception as exc:
+        logger.debug("Failed to load projects from DB, falling back to filesystem: %s", exc)
+
+    # Fallback to filesystem scan
+    projects = _scan_projects_from_filesystem()
     with _cache_lock:
         _project_cache = projects
         _project_cache_time = time.monotonic()
