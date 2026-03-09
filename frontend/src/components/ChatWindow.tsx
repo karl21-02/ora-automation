@@ -15,6 +15,7 @@ interface Props {
   orgName: string | null
   orgs: Organization[]
   onChangeOrg: (orgId: string | null) => void
+  onNavigateToOrgs?: () => void
 }
 
 const STAGE_COLORS: Record<string, string> = {
@@ -24,7 +25,7 @@ const STAGE_COLORS: Record<string, string> = {
   validation: '#f59e0b',
 }
 
-export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, conversationId, orgId, orgName: _orgName, orgs, onChangeOrg }: Props) {
+export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, conversationId, orgId, orgName: _orgName, orgs, onChangeOrg, onNavigateToOrgs }: Props) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [streaming, setStreaming] = useState(false)
@@ -324,6 +325,7 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
           currentOrgId={orgId}
           orgs={orgs}
           onSelect={onChangeOrg}
+          onCreateNew={onNavigateToOrgs}
         />
       </div>
 

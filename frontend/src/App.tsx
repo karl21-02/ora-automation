@@ -316,6 +316,7 @@ export default function App() {
           orgName={activeConv.orgName ?? null}
           orgs={orgs}
           onChangeOrg={(orgId) => handleChangeConversationOrg(activeConv.id, orgId)}
+          onNavigateToOrgs={() => setActiveMenu('orgs')}
         />
       )}
       {activeMenu === 'reports' && (
