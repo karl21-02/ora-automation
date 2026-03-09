@@ -87,6 +87,59 @@ def detect_primary_language(repo_path: Path) -> str | None:
     return max(counts, key=lambda k: counts[k])
 
 
+def normalize_github_url(url: str) -> str:
+    """Normalize GitHub URL to a canonical form for comparison.
+
+    Converts various GitHub URL formats to: github.com/owner/repo
+
+    Examples:
+        git@github.com:owner/repo.git -> github.com/owner/repo
+        https://github.com/owner/repo.git -> github.com/owner/repo
+        https://github.com/owner/repo -> github.com/owner/repo
+
+    Args:
+        url: Git remote URL in any format.
+
+    Returns:
+        Normalized URL string (lowercase, no protocol, no .git suffix).
+    """
+    if not url:
+        return ""
+
+    normalized = url.strip()
+
+    # SSH format: git@github.com:owner/repo.git
+    if normalized.startswith("git@github.com:"):
+        normalized = normalized.replace("git@github.com:", "github.com/")
+
+    # HTTPS format: https://github.com/owner/repo.git
+    normalized = normalized.replace("https://github.com/", "github.com/")
+    normalized = normalized.replace("http://github.com/", "github.com/")
+
+    # Remove .git suffix
+    if normalized.endswith(".git"):
+        normalized = normalized[:-4]
+
+    # Remove trailing slash
+    normalized = normalized.rstrip("/")
+
+    return normalized.lower()
+
+
+def is_github_url(url: str | None) -> bool:
+    """Check if a URL is a GitHub repository URL.
+
+    Args:
+        url: Git remote URL.
+
+    Returns:
+        True if the URL points to GitHub.
+    """
+    if not url:
+        return False
+    return "github.com" in url.lower()
+
+
 def scan_local_workspace(workspace_path: str | Path) -> list[dict]:
     """Scan a workspace directory for Git repositories.
 
