@@ -1,4 +1,4 @@
-import type { ChatChoice, ChatPlan, ChatResponse, OrgAgent, OrgChapter, OrgRecommendOption, OrgSilo, OrchestrationEvent, OrchestrationRun, Organization, OrganizationDetail, ProjectInfo, ReportListItem, ScheduledJob, ScheduledJobCreate } from '../types'
+import type { ChatChoice, ChatPlan, ChatResponse, GithubInstallation, GithubRepo, LocalScanResult, OrgAgent, OrgChapter, OrgRecommendOption, OrgSilo, OrchestrationEvent, OrchestrationRun, Organization, OrganizationDetail, ProjectInfo, ProjectList, ProjectPrepareResponse, ReportListItem, ScheduledJob, ScheduledJobCreate, UnifiedProject } from '../types'
 
 const BASE = '/api/v1'
 
@@ -385,4 +385,100 @@ export async function updateChapter(orgId: string, chapterId: string, data: Part
 
 export async function deleteChapter(orgId: string, chapterId: string): Promise<void> {
   await fetch(`${BASE}/orgs/${orgId}/chapters/${chapterId}`, { method: 'DELETE' })
+}
+
+// ── GitHub Integration ──────────────────────────────────────────────
+
+export async function getGithubInstallUrl(): Promise<{ url: string }> {
+  return request<{ url: string }>(`${BASE}/github/install-url`)
+}
+
+export async function listGithubInstallations(): Promise<GithubInstallation[]> {
+  return request<GithubInstallation[]>(`${BASE}/github/installations`)
+}
+
+export async function syncGithubInstallation(installationId: string): Promise<{ synced: number }> {
+  return request<{ synced: number }>(`${BASE}/github/installations/${installationId}/sync`, {
+    method: 'POST',
+  })
+}
+
+export async function deleteGithubInstallation(installationId: string): Promise<void> {
+  await fetch(`${BASE}/github/installations/${installationId}`, { method: 'DELETE' })
+}
+
+export async function listGithubRepos(installationId?: string): Promise<GithubRepo[]> {
+  const params = installationId ? `?installation_id=${installationId}` : ''
+  return request<GithubRepo[]>(`${BASE}/github/repos${params}`)
+}
+
+// ── Unified Projects ──────────────────────────────────────────────
+
+export async function listUnifiedProjects(params?: {
+  source_type?: string
+  enabled?: boolean
+  search?: string
+  limit?: number
+  offset?: number
+}): Promise<ProjectList> {
+  const searchParams = new URLSearchParams()
+  if (params?.source_type) searchParams.set('source_type', params.source_type)
+  if (params?.enabled !== undefined) searchParams.set('enabled', String(params.enabled))
+  if (params?.search) searchParams.set('search', params.search)
+  if (params?.limit) searchParams.set('limit', String(params.limit))
+  if (params?.offset) searchParams.set('offset', String(params.offset))
+  const query = searchParams.toString()
+  return request<ProjectList>(`${BASE}/unified-projects${query ? `?${query}` : ''}`)
+}
+
+export async function getUnifiedProject(projectId: string): Promise<UnifiedProject> {
+  return request<UnifiedProject>(`${BASE}/unified-projects/${projectId}`)
+}
+
+export async function createUnifiedProject(data: {
+  name: string
+  description?: string
+  source_type?: string
+  local_path?: string
+  github_repo_id?: string
+  enabled?: boolean
+  language?: string
+  default_branch?: string
+}): Promise<UnifiedProject> {
+  return request<UnifiedProject>(`${BASE}/unified-projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateUnifiedProject(projectId: string, data: Partial<{
+  name: string
+  description: string
+  enabled: boolean
+  language: string
+  default_branch: string
+}>): Promise<UnifiedProject> {
+  return request<UnifiedProject>(`${BASE}/unified-projects/${projectId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteUnifiedProject(projectId: string): Promise<void> {
+  await fetch(`${BASE}/unified-projects/${projectId}`, { method: 'DELETE' })
+}
+
+export async function scanLocalProjects(workspacePath?: string): Promise<LocalScanResult> {
+  const params = workspacePath ? `?workspace_path=${encodeURIComponent(workspacePath)}` : ''
+  return request<LocalScanResult>(`${BASE}/unified-projects/scan-local${params}`, {
+    method: 'POST',
+  })
+}
+
+export async function prepareProject(projectId: string, forcePull = false): Promise<ProjectPrepareResponse> {
+  return request<ProjectPrepareResponse>(`${BASE}/unified-projects/${projectId}/prepare?force_pull=${forcePull}`, {
+    method: 'POST',
+  })
 }
