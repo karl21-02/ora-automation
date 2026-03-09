@@ -6,11 +6,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ProjectInfo(BaseModel):
+    """Project information for chat UI display."""
+    id: str = ""
     name: str
     path: str
     has_makefile: bool = False
     has_dockerfile: bool = False
     description: str = ""
+    source_type: str = "local"  # "local", "github", "github_only"
+    language: str | None = None
 
 
 class DecisionCreate(BaseModel):
