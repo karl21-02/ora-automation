@@ -207,6 +207,7 @@ def scan_local(
 @router.post("/{project_id}/prepare", response_model=ProjectPrepareResponse)
 async def prepare_project(
     project_id: str,
+    force_pull: bool = Query(False, description="Force pull updates if already cloned"),
     db: Session = Depends(get_db),
 ) -> ProjectPrepareResponse:
     """Prepare a project for analysis (clone if needed).
@@ -214,14 +215,17 @@ async def prepare_project(
     For github_only projects, performs a shallow clone.
     For local/github projects, verifies the path exists.
     """
+    from pathlib import Path
+    from .clone_service import ensure_local_clone, is_cloned
+
     project = db.scalar(select(Project).where(Project.id == project_id))
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # If local path exists, just return it
+    # If local path exists and is valid, just return it
     if project.local_path:
-        from pathlib import Path
-        if Path(project.local_path).exists():
+        local_path = Path(project.local_path)
+        if local_path.exists():
             return ProjectPrepareResponse(
                 project_id=project_id,
                 local_path=project.local_path,
@@ -241,51 +245,27 @@ async def prepare_project(
     if not github_repo:
         raise HTTPException(status_code=404, detail="Linked GitHub repo not found")
 
-    # Perform shallow clone
-    from pathlib import Path
-    import asyncio
+    # Check if already cloned
+    already_cloned = is_cloned(github_repo.full_name)
 
-    clone_dir = settings.github_clone_base_dir / github_repo.full_name
-    clone_dir.parent.mkdir(parents=True, exist_ok=True)
-
-    if clone_dir.exists():
-        # Already cloned, just update local_path
-        project.local_path = str(clone_dir)
-        db.commit()
-        return ProjectPrepareResponse(
-            project_id=project_id,
-            local_path=str(clone_dir),
-            cloned=False,
+    try:
+        clone_path = await ensure_local_clone(
+            clone_url=github_repo.clone_url,
+            full_name=github_repo.full_name,
+            branch=github_repo.default_branch,
+            force_pull=force_pull,
         )
-
-    # Clone the repo
-    cmd = [
-        "git", "clone",
-        "--depth", "1",
-        "--single-branch",
-        github_repo.clone_url,
-        str(clone_dir),
-    ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
-
-    if proc.returncode != 0:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Clone failed: {stderr.decode()[:500]}",
-        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
     # Update project with local path
-    project.local_path = str(clone_dir)
-    project.source_type = "github"
+    project.local_path = str(clone_path)
+    if project.source_type == "github_only":
+        project.source_type = "github"
     db.commit()
 
     return ProjectPrepareResponse(
         project_id=project_id,
-        local_path=str(clone_dir),
-        cloned=True,
+        local_path=str(clone_path),
+        cloned=not already_cloned,
     )
