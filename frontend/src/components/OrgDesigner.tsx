@@ -147,6 +147,21 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
     }
   }
 
+  const handleDropOnChapter = async (e: React.DragEvent, chapterId: string) => {
+    e.preventDefault()
+    const agentId = e.dataTransfer.getData('agentId')
+    if (!agentId) return
+    setDragOverTarget(null)
+    setDraggingAgentId(null)
+    setError('')
+    try {
+      await updateAgent(org.id, agentId, { chapter_id: chapterId })
+      await onRefresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to assign to chapter')
+    }
+  }
+
   const handleCreateSilo = async () => {
     if (!newSiloName.trim()) return
     setError('')
@@ -403,29 +418,59 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
         <>
           {/* CHAPTERS Section */}
           <Section title="CHAPTERS" count={org.chapters.length}>
-            {org.chapters.map(ch => (
-              <div key={ch.id} style={{ ...chapterCardStyle, borderLeftColor: ch.color }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontSize: 16 }}>{ch.icon}</span>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{ch.name}</span>
-                  <div style={{ flex: 1 }} />
-                  <button onClick={() => onSelectChapter(ch.id)} style={editBtnStyle}>Edit</button>
-                  {!readonly && (
-                    <button onClick={() => handleDeleteChapter(ch.id, ch.name)} style={xBtnStyle} title="Delete chapter">X</button>
+            {org.chapters.map(ch => {
+              const isDropTarget = dragOverTarget === `chapter:${ch.id}`
+              return (
+                <div
+                  key={ch.id}
+                  style={{
+                    ...chapterCardStyle,
+                    borderLeftColor: ch.color,
+                    border: isDropTarget ? '2px dashed #2563eb' : '1px solid #e5e7eb',
+                    borderLeft: `4px solid ${ch.color}`,
+                    backgroundColor: isDropTarget ? '#eff6ff' : '#fafafa',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onDragOver={!readonly ? (e) => handleDragOver(e, `chapter:${ch.id}`) : undefined}
+                  onDragLeave={!readonly ? handleDragLeave : undefined}
+                  onDrop={!readonly ? (e) => handleDropOnChapter(e, ch.id) : undefined}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 16 }}>{ch.icon}</span>
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>{ch.name}</span>
+                    <div style={{ flex: 1 }} />
+                    <button onClick={() => onSelectChapter(ch.id)} style={editBtnStyle}>Edit</button>
+                    {!readonly && (
+                      <button onClick={() => handleDeleteChapter(ch.id, ch.name)} style={xBtnStyle} title="Delete chapter">X</button>
+                    )}
+                  </div>
+                  {ch.chapter_prompt && (
+                    <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4, whiteSpace: 'pre-wrap', maxHeight: 40, overflow: 'hidden' }}>
+                      {ch.chapter_prompt}
+                    </div>
                   )}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, minHeight: 28 }}>
+                    {(chapterAgentMap[ch.id] || []).map(agent => (
+                      <AgentChip
+                        key={agent.id}
+                        agent={agent}
+                        onClick={() => onSelectAgent(agent.id)}
+                        draggable={!readonly}
+                        dragging={draggingAgentId === agent.id}
+                        onDragStart={!readonly ? (e) => handleDragStart(e, agent.id) : undefined}
+                        onDragEnd={!readonly ? handleDragEnd : undefined}
+                      />
+                    ))}
+                    {(chapterAgentMap[ch.id] || []).length === 0 && !draggingAgentId && (
+                      <span style={{ fontSize: 12, color: '#9ca3af' }}>No agents</span>
+                    )}
+                    {(chapterAgentMap[ch.id] || []).length === 0 && draggingAgentId && (
+                      <span style={{ fontSize: 12, color: '#6b7280' }}>Drop here to assign</span>
+                    )}
+                  </div>
                 </div>
-                {ch.chapter_prompt && (
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4, whiteSpace: 'pre-wrap', maxHeight: 40, overflow: 'hidden' }}>
-                    {ch.chapter_prompt}
-                  </div>
-                )}
-                {(chapterAgentMap[ch.id] || []).length > 0 && (
-                  <div style={{ fontSize: 11, color: '#9ca3af' }}>
-                    Members: {(chapterAgentMap[ch.id] || []).map(a => a.display_name).join(', ')}
-                  </div>
-                )}
-              </div>
-            ))}
+              )
+            })}
 
             {!readonly && (
               addingChapter ? (
