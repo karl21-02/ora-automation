@@ -5,6 +5,7 @@ import logging
 import re
 from uuid import uuid4
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import ScheduledJob
@@ -134,7 +135,18 @@ def create_scheduled_job_from_slots(
     job.next_run_at = OraScheduler._calculate_next_run(job)
 
     db.add(job)
-    db.flush()
+
+    # Handle race condition: another request might have created the same name
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        # Check if it's a unique constraint violation on name
+        if "name" in str(exc).lower() or "unique" in str(exc).lower():
+            raise ScheduleValidationError(
+                f"동일한 이름의 스케줄이 이미 존재합니다: '{name}'"
+            ) from None
+        raise  # Re-raise other integrity errors
 
     logger.info("Created scheduled job '%s' (id=%s)", name, job.id)
     return job
