@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Organization } from '../types'
 import { Building2, Check, ChevronDown, Plus } from 'lucide-react'
 
@@ -11,9 +11,28 @@ interface OrgSwitcherProps {
 
 export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew }: OrgSwitcherProps) {
   const [open, setOpen] = useState(false)
+  const [focusedIndex, setFocusedIndex] = useState(-1)
   const ref = useRef<HTMLDivElement>(null)
 
   const current = orgs.find(o => o.id === currentOrgId)
+
+  // Build list of selectable options: [null (unclassified), ...org ids, 'create' if onCreateNew]
+  const options = useMemo(() => {
+    const list: (string | null)[] = [null, ...orgs.map(o => o.id)]
+    if (onCreateNew) list.push('__create__')
+    return list
+  }, [orgs, onCreateNew])
+
+  // Reset focus when dropdown opens/closes
+  useEffect(() => {
+    if (open) {
+      // Focus on current selection
+      const idx = options.indexOf(currentOrgId)
+      setFocusedIndex(idx >= 0 ? idx : 0)
+    } else {
+      setFocusedIndex(-1)
+    }
+  }, [open, currentOrgId, options])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -28,20 +47,56 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
     }
   }, [open])
 
-  // Close on Escape
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+  // Handle keyboard navigation
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (!open) {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        setOpen(true)
+      }
+      return
     }
-    if (open) {
-      document.addEventListener('keydown', handleEscape)
-      return () => document.removeEventListener('keydown', handleEscape)
+
+    switch (e.key) {
+      case 'Escape':
+        e.preventDefault()
+        setOpen(false)
+        break
+      case 'ArrowDown':
+        e.preventDefault()
+        setFocusedIndex(prev => Math.min(prev + 1, options.length - 1))
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        setFocusedIndex(prev => Math.max(prev - 1, 0))
+        break
+      case 'Enter':
+        e.preventDefault()
+        if (focusedIndex >= 0 && focusedIndex < options.length) {
+          const option = options[focusedIndex]
+          if (option === '__create__') {
+            onCreateNew?.()
+          } else {
+            onSelect(option)
+          }
+          setOpen(false)
+        }
+        break
     }
-  }, [open])
+  }, [open, focusedIndex, options, onSelect, onCreateNew])
+
+  // Get index of an option in the options array
+  const getOptionIndex = (id: string | null) => options.indexOf(id)
+  const createIndex = options.indexOf('__create__')
 
   return (
-    <div ref={ref} style={switcherStyle}>
-      <button onClick={() => setOpen(!open)} style={triggerStyle}>
+    <div ref={ref} style={switcherStyle} onKeyDown={handleKeyDown}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={triggerStyle}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
         <Building2 size={16} color="#6b7280" />
         <span style={{ flex: 1, textAlign: 'left', color: current ? '#374151' : '#9ca3af' }}>
           {current?.name || '조직 미선택'}
@@ -58,14 +113,17 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
       </button>
 
       {open && (
-        <div style={dropdownStyle}>
+        <div style={dropdownStyle} role="listbox">
           {/* Unclassified option */}
           <button
             onClick={() => { onSelect(null); setOpen(false) }}
             style={{
               ...itemStyle,
-              backgroundColor: currentOrgId === null ? '#f3f4f6' : 'transparent',
+              backgroundColor: focusedIndex === 0 ? '#dbeafe' : currentOrgId === null ? '#f3f4f6' : 'transparent',
+              outline: focusedIndex === 0 ? '2px solid #2563eb' : 'none',
             }}
+            role="option"
+            aria-selected={currentOrgId === null}
           >
             <span style={{ width: 16, display: 'flex', justifyContent: 'center' }}>
               {currentOrgId === null && <Check size={14} color="#2563eb" />}
@@ -76,22 +134,30 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
           {orgs.length > 0 && <div style={dividerStyle} />}
 
           {/* Org list */}
-          {orgs.map(org => (
-            <button
-              key={org.id}
-              onClick={() => { onSelect(org.id); setOpen(false) }}
-              style={{
-                ...itemStyle,
-                backgroundColor: currentOrgId === org.id ? '#f3f4f6' : 'transparent',
-              }}
-            >
-              <span style={{ width: 16, display: 'flex', justifyContent: 'center' }}>
-                {currentOrgId === org.id && <Check size={14} color="#2563eb" />}
-              </span>
-              <span style={{ flex: 1 }}>{org.name}</span>
-              {org.is_preset && <span style={presetBadgeSmall}>Preset</span>}
-            </button>
-          ))}
+          {orgs.map((org, idx) => {
+            const optionIdx = getOptionIndex(org.id)
+            const isFocused = focusedIndex === optionIdx
+            const isSelected = currentOrgId === org.id
+            return (
+              <button
+                key={org.id}
+                onClick={() => { onSelect(org.id); setOpen(false) }}
+                style={{
+                  ...itemStyle,
+                  backgroundColor: isFocused ? '#dbeafe' : isSelected ? '#f3f4f6' : 'transparent',
+                  outline: isFocused ? '2px solid #2563eb' : 'none',
+                }}
+                role="option"
+                aria-selected={isSelected}
+              >
+                <span style={{ width: 16, display: 'flex', justifyContent: 'center' }}>
+                  {isSelected && <Check size={14} color="#2563eb" />}
+                </span>
+                <span style={{ flex: 1 }}>{org.name}</span>
+                {org.is_preset && <span style={presetBadgeSmall}>Preset</span>}
+              </button>
+            )
+          })}
 
           {/* Empty state hint */}
           {orgs.length === 0 && onCreateNew && (
@@ -106,13 +172,23 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
               {orgs.length > 0 && <div style={dividerStyle} />}
               <button
                 onClick={() => { onCreateNew(); setOpen(false) }}
-                style={{ ...itemStyle, color: '#2563eb' }}
+                style={{
+                  ...itemStyle,
+                  color: '#2563eb',
+                  backgroundColor: focusedIndex === createIndex ? '#dbeafe' : 'transparent',
+                  outline: focusedIndex === createIndex ? '2px solid #2563eb' : 'none',
+                }}
               >
                 <Plus size={14} />
                 <span>새 조직 만들기</span>
               </button>
             </>
           )}
+
+          {/* Keyboard hint */}
+          <div style={keyboardHintStyle}>
+            ↑↓ 이동 · Enter 선택 · Esc 닫기
+          </div>
         </div>
       )}
     </div>
@@ -204,4 +280,13 @@ const emptyHintStyle: React.CSSProperties = {
   backgroundColor: '#f9fafb',
   borderRadius: 6,
   margin: '4px 8px',
+}
+
+const keyboardHintStyle: React.CSSProperties = {
+  padding: '6px 12px',
+  fontSize: 10,
+  color: '#9ca3af',
+  textAlign: 'center',
+  borderTop: '1px solid #f3f4f6',
+  marginTop: 4,
 }
