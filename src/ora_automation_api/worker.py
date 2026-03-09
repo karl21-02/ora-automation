@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
+import os
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -11,6 +11,7 @@ from uuid import uuid4
 import pika
 
 from .config import settings
+from .logging_config import get_logger, setup_logging
 from .queue import (
     AgentRole,
     dlq_name_for_role,
@@ -21,12 +22,9 @@ from .queue import (
 )
 from .service import execute_run, recover_stale_runs
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [ora-automation-worker] %(message)s",
-)
-logger = logging.getLogger("ora_automation.worker")
+# Initialize logging for worker process
+setup_logging(level=os.getenv("LOG_LEVEL", "INFO"))
+logger = get_logger("ora_automation.worker")
 
 
 def _parse_payload(body: bytes) -> dict:

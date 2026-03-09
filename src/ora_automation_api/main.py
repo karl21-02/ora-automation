@@ -8,6 +8,11 @@ from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+
+from .logging_config import setup_logging
+
+# Initialize logging before any other imports that might use logging
+setup_logging(level=os.getenv("LOG_LEVEL", "INFO"))
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
