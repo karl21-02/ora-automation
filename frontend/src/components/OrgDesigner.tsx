@@ -18,6 +18,10 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
   const [assignDropdown, setAssignDropdown] = useState<string | null>(null)
   const [error, setError] = useState('')
 
+  // Drag & Drop state
+  const [draggingAgentId, setDraggingAgentId] = useState<string | null>(null)
+  const [dragOverTarget, setDragOverTarget] = useState<string | null>(null) // silo id or 'clevel'
+
   // Pipeline settings state
   const pp = org.pipeline_params || {}
   const [pipelineForm, setPipelineForm] = useState({
@@ -79,6 +83,67 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
       await onRefresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to unassign')
+    }
+  }
+
+  // Drag & Drop handlers
+  const handleDragStart = (e: React.DragEvent, agentId: string) => {
+    e.dataTransfer.setData('agentId', agentId)
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggingAgentId(agentId)
+  }
+
+  const handleDragEnd = () => {
+    setDraggingAgentId(null)
+    setDragOverTarget(null)
+  }
+
+  const handleDragOver = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDragOverTarget(targetId)
+  }
+
+  const handleDragLeave = () => {
+    setDragOverTarget(null)
+  }
+
+  const handleDropOnSilo = async (e: React.DragEvent, siloId: string) => {
+    e.preventDefault()
+    const agentId = e.dataTransfer.getData('agentId')
+    if (!agentId) return
+    setDragOverTarget(null)
+    setDraggingAgentId(null)
+    await handleAssignToSilo(agentId, siloId)
+  }
+
+  const handleDropOnClevel = async (e: React.DragEvent) => {
+    e.preventDefault()
+    const agentId = e.dataTransfer.getData('agentId')
+    if (!agentId) return
+    setDragOverTarget(null)
+    setDraggingAgentId(null)
+    setError('')
+    try {
+      await updateAgent(org.id, agentId, { is_clevel: true, silo_id: null })
+      await onRefresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to promote to C-Level')
+    }
+  }
+
+  const handleDropOnUnassigned = async (e: React.DragEvent) => {
+    e.preventDefault()
+    const agentId = e.dataTransfer.getData('agentId')
+    if (!agentId) return
+    setDragOverTarget(null)
+    setDraggingAgentId(null)
+    setError('')
+    try {
+      await updateAgent(org.id, agentId, { is_clevel: false, silo_id: null })
+      await onRefresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to unassign')
     }
   }
 
@@ -169,10 +234,38 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
 
       {/* C-LEVEL Section */}
       <Section title="C-LEVEL" count={clevelAgents.length}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {clevelAgents.length === 0 && <span style={{ fontSize: 12, color: '#9ca3af' }}>No C-Level agents</span>}
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 6,
+            minHeight: 40,
+            padding: 8,
+            borderRadius: 8,
+            border: dragOverTarget === 'clevel' ? '2px dashed #2563eb' : '2px dashed transparent',
+            backgroundColor: dragOverTarget === 'clevel' ? '#eff6ff' : 'transparent',
+            transition: 'all 0.15s ease',
+          }}
+          onDragOver={!readonly ? (e) => handleDragOver(e, 'clevel') : undefined}
+          onDragLeave={!readonly ? handleDragLeave : undefined}
+          onDrop={!readonly ? handleDropOnClevel : undefined}
+        >
+          {clevelAgents.length === 0 && !draggingAgentId && (
+            <span style={{ fontSize: 12, color: '#9ca3af' }}>No C-Level agents</span>
+          )}
+          {clevelAgents.length === 0 && draggingAgentId && (
+            <span style={{ fontSize: 12, color: '#6b7280' }}>Drop here to promote to C-Level</span>
+          )}
           {clevelAgents.map(agent => (
-            <AgentChip key={agent.id} agent={agent} onClick={() => onSelectAgent(agent.id)} />
+            <AgentChip
+              key={agent.id}
+              agent={agent}
+              onClick={() => onSelectAgent(agent.id)}
+              draggable={!readonly}
+              dragging={draggingAgentId === agent.id}
+              onDragStart={!readonly ? (e) => handleDragStart(e, agent.id) : undefined}
+              onDragEnd={!readonly ? handleDragEnd : undefined}
+            />
           ))}
         </div>
       </Section>
@@ -180,7 +273,20 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
       {/* SILOS Section */}
       <Section title="SILOS" count={org.silos.length}>
         {org.silos.map(silo => (
-          <div key={silo.id} style={{ ...siloCardStyle, borderLeftColor: silo.color }}>
+          <div
+            key={silo.id}
+            style={{
+              ...siloCardStyle,
+              borderLeftColor: silo.color,
+              border: dragOverTarget === silo.id ? '2px dashed #2563eb' : '1px solid #e5e7eb',
+              borderLeft: `4px solid ${silo.color}`,
+              backgroundColor: dragOverTarget === silo.id ? '#eff6ff' : '#fafafa',
+              transition: 'all 0.15s ease',
+            }}
+            onDragOver={!readonly ? (e) => handleDragOver(e, silo.id) : undefined}
+            onDragLeave={!readonly ? handleDragLeave : undefined}
+            onDrop={!readonly ? (e) => handleDropOnSilo(e, silo.id) : undefined}
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <span style={{ fontWeight: 600, fontSize: 13 }}>{silo.name}</span>
               {silo.description && <span style={{ fontSize: 11, color: '#9ca3af' }}>{silo.description}</span>}
@@ -189,20 +295,27 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
                 <button onClick={() => handleDeleteSilo(silo.id, silo.name)} style={xBtnStyle} title="Delete silo">X</button>
               )}
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, minHeight: 28 }}>
               {(siloAgentMap[silo.id] || []).map(agent => (
                 <AgentChip
                   key={agent.id}
                   agent={agent}
                   onClick={() => onSelectAgent(agent.id)}
                   onRemove={!readonly ? () => handleUnassignFromSilo(agent.id) : undefined}
+                  draggable={!readonly}
+                  dragging={draggingAgentId === agent.id}
+                  onDragStart={!readonly ? (e) => handleDragStart(e, agent.id) : undefined}
+                  onDragEnd={!readonly ? handleDragEnd : undefined}
                 />
               ))}
-              {(siloAgentMap[silo.id] || []).length === 0 && (
+              {(siloAgentMap[silo.id] || []).length === 0 && !draggingAgentId && (
                 <span style={{ fontSize: 12, color: '#9ca3af' }}>No agents</span>
               )}
+              {(siloAgentMap[silo.id] || []).length === 0 && draggingAgentId && (
+                <span style={{ fontSize: 12, color: '#6b7280' }}>Drop here to assign</span>
+              )}
             </div>
-            {!readonly && (
+            {!readonly && !draggingAgentId && (
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 {assignDropdown === silo.id ? (
                   <>
@@ -249,11 +362,37 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
       </Section>
 
       {/* UNASSIGNED Section */}
-      {unassignedAgents.length > 0 && (
+      {(unassignedAgents.length > 0 || draggingAgentId) && (
         <Section title="UNASSIGNED" count={unassignedAgents.length}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 6,
+              minHeight: 40,
+              padding: 8,
+              borderRadius: 8,
+              border: dragOverTarget === 'unassigned' ? '2px dashed #2563eb' : '2px dashed transparent',
+              backgroundColor: dragOverTarget === 'unassigned' ? '#eff6ff' : 'transparent',
+              transition: 'all 0.15s ease',
+            }}
+            onDragOver={!readonly ? (e) => handleDragOver(e, 'unassigned') : undefined}
+            onDragLeave={!readonly ? handleDragLeave : undefined}
+            onDrop={!readonly ? handleDropOnUnassigned : undefined}
+          >
+            {unassignedAgents.length === 0 && draggingAgentId && (
+              <span style={{ fontSize: 12, color: '#6b7280' }}>Drop here to unassign</span>
+            )}
             {unassignedAgents.map(agent => (
-              <AgentChip key={agent.id} agent={agent} onClick={() => onSelectAgent(agent.id)} />
+              <AgentChip
+                key={agent.id}
+                agent={agent}
+                onClick={() => onSelectAgent(agent.id)}
+                draggable={!readonly}
+                dragging={draggingAgentId === agent.id}
+                onDragStart={!readonly ? (e) => handleDragStart(e, agent.id) : undefined}
+                onDragEnd={!readonly ? handleDragEnd : undefined}
+              />
             ))}
           </div>
         </Section>
@@ -359,9 +498,36 @@ function Section({ title, count, children }: { title: string; count?: number; ch
   )
 }
 
-function AgentChip({ agent, onClick, onRemove }: { agent: OrgAgent; onClick: () => void; onRemove?: () => void }) {
+function AgentChip({
+  agent,
+  onClick,
+  onRemove,
+  draggable,
+  dragging,
+  onDragStart,
+  onDragEnd,
+}: {
+  agent: OrgAgent
+  onClick: () => void
+  onRemove?: () => void
+  draggable?: boolean
+  dragging?: boolean
+  onDragStart?: (e: React.DragEvent) => void
+  onDragEnd?: () => void
+}) {
   return (
-    <span style={chipStyle}>
+    <span
+      style={{
+        ...chipStyle,
+        cursor: draggable ? 'grab' : 'default',
+        opacity: dragging ? 0.5 : 1,
+        transform: dragging ? 'scale(0.95)' : 'scale(1)',
+        transition: 'all 0.15s ease',
+      }}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+    >
       <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: agent.enabled ? '#22c55e' : '#d1d5db', display: 'inline-block' }} />
       <span onClick={onClick} style={{ cursor: 'pointer' }}>{agent.display_name}</span>
       {onRemove && (
