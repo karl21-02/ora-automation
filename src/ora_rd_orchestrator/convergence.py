@@ -197,15 +197,32 @@ def _aggregate_chapter_scores(
 
 
 # ---------------------------------------------------------------------------
-# Node functions
+# Common deliberation loop helper
 # ---------------------------------------------------------------------------
 
-def _run_chapter_deliberation(
-    chapter_id: str,
-    chapter_name: str,
+def _build_mock_topic_catalog(topic_ids: list[str]) -> dict[str, Any]:
+    """Build minimal TopicState-like objects for decision parsing."""
+    catalog: dict[str, Any] = {}
+    for tid in topic_ids:
+        catalog[tid] = type("_TS", (), {
+            "topic_name": tid,
+            "evidence": [],
+            "project_hits": {},
+            "compute_features": lambda self=None: {},
+            "keyword_hits": 0,
+            "business_hits": 0,
+            "novelty_hits": 0,
+            "code_hits": 0,
+            "doc_hits": 0,
+            "history_hits": 0,
+        })()
+    return catalog
+
+
+def _run_deliberation_loop(
+    working_scores: dict[str, dict[str, float]],
     agent_ids: list[str],
     topic_ids: list[str],
-    initial_scores: dict,
     agent_definitions: dict,
     llm_command: str,
     llm_timeout: float,
@@ -213,33 +230,17 @@ def _run_chapter_deliberation(
     stages: list[str],
     max_rounds: int,
     threshold: float,
-) -> dict:
-    """Run deliberation within a single chapter until convergence."""
+) -> tuple[dict[str, dict[str, float]], int, bool, list[dict]]:
+    """Run deliberation rounds until convergence.
+
+    Returns:
+        (final_scores, rounds_executed, converged, discussion)
+    """
     from .deliberation import llm_deliberation_round
     from .report_builder import _agent_score_key
 
-    # Filter scores to only this chapter's agents
-    working_scores: dict[str, dict[str, float]] = {}
-    for tid in topic_ids:
-        per_topic: dict[str, float] = {}
-        full_topic_scores = initial_scores.get(tid, {})
-        for aid in agent_ids:
-            key = _agent_score_key(aid)
-            if key in full_topic_scores:
-                per_topic[key] = full_topic_scores[key]
-        working_scores[tid] = per_topic
-
-    # Build minimal TopicState catalog for decision parsing
-    topic_catalog: dict[str, Any] = {}
-    for tid in topic_ids:
-        topic_catalog[tid] = type("_TS", (), {"topic_name": tid, "evidence": [], "project_hits": {},
-                                               "compute_features": lambda self=None: {},
-                                               "keyword_hits": 0, "business_hits": 0,
-                                               "novelty_hits": 0, "code_hits": 0,
-                                               "doc_hits": 0, "history_hits": 0})()
-
-    # Filter agent_definitions to chapter agents
-    chapter_defs = {k: v for k, v in agent_definitions.items() if k in agent_ids}
+    topic_catalog = _build_mock_topic_catalog(topic_ids)
+    filtered_defs = {k: v for k, v in agent_definitions.items() if k in agent_ids}
 
     prev_flat: dict[str, float] = {}
     discussion: list[dict] = []
@@ -260,18 +261,19 @@ def _run_chapter_deliberation(
             previous_discussion=discussion,
             command=llm_command,
             timeout=llm_timeout,
-            agent_definitions=chapter_defs,
+            agent_definitions=filtered_defs,
             known_agent_ids=set(agent_ids),
         )
 
-        # Apply score updates
+        # Apply score updates with bounds clamping
         for tid, per_agent in score_updates.items():
             if tid not in working_scores:
                 continue
             for agent_name, delta in per_agent.items():
                 key = _agent_score_key(agent_name)
                 if key in working_scores[tid]:
-                    working_scores[tid][key] = max(0.0, min(10.0, working_scores[tid][key] + delta))
+                    new_val = working_scores[tid][key] + delta
+                    working_scores[tid][key] = max(0.0, min(10.0, new_val))
 
         if summaries:
             discussion.extend(summaries)
@@ -283,11 +285,60 @@ def _run_chapter_deliberation(
             break
         prev_flat = curr_flat
 
+    return working_scores, rounds_executed, converged, discussion
+
+
+# ---------------------------------------------------------------------------
+# Node functions
+# ---------------------------------------------------------------------------
+
+def _run_chapter_deliberation(
+    chapter_id: str,
+    chapter_name: str,
+    agent_ids: list[str],
+    topic_ids: list[str],
+    initial_scores: dict,
+    agent_definitions: dict,
+    llm_command: str,
+    llm_timeout: float,
+    service_scope: list[str],
+    stages: list[str],
+    max_rounds: int,
+    threshold: float,
+) -> dict:
+    """Run deliberation within a single chapter until convergence."""
+    from .report_builder import _agent_score_key
+
+    # Filter scores to only this chapter's agents
+    working_scores: dict[str, dict[str, float]] = {}
+    for tid in topic_ids:
+        per_topic: dict[str, float] = {}
+        full_topic_scores = initial_scores.get(tid, {})
+        for aid in agent_ids:
+            key = _agent_score_key(aid)
+            if key in full_topic_scores:
+                per_topic[key] = full_topic_scores[key]
+        working_scores[tid] = per_topic
+
+    # Run deliberation loop
+    final_scores, rounds_executed, converged, discussion = _run_deliberation_loop(
+        working_scores=working_scores,
+        agent_ids=agent_ids,
+        topic_ids=topic_ids,
+        agent_definitions=agent_definitions,
+        llm_command=llm_command,
+        llm_timeout=llm_timeout,
+        service_scope=service_scope,
+        stages=stages,
+        max_rounds=max_rounds,
+        threshold=threshold,
+    )
+
     return {
         "chapter_id": chapter_id,
         "chapter_name": chapter_name,
         "agent_ids": agent_ids,
-        "topic_scores": working_scores,
+        "topic_scores": final_scores,
         "rounds_executed": rounds_executed,
         "converged": converged,
         "discussion": discussion,
@@ -330,7 +381,6 @@ def _run_silo_deliberation(
     threshold: float,
 ) -> dict:
     """Run deliberation among chapter representatives within a silo."""
-    from .deliberation import llm_deliberation_round
     from .report_builder import _agent_score_key
 
     # Collect representative agent IDs (first agent from each chapter)
@@ -363,60 +413,23 @@ def _run_silo_deliberation(
             per_topic[key] = ch_scores.get(key, 5.0)
         working_scores[tid] = per_topic
 
-    topic_catalog: dict[str, Any] = {}
-    for tid in topic_ids:
-        topic_catalog[tid] = type("_TS", (), {"topic_name": tid, "evidence": [], "project_hits": {},
-                                               "compute_features": lambda self=None: {},
-                                               "keyword_hits": 0, "business_hits": 0,
-                                               "novelty_hits": 0, "code_hits": 0,
-                                               "doc_hits": 0, "history_hits": 0})()
+    # Run deliberation loop
+    final_scores, rounds_executed, converged, discussion = _run_deliberation_loop(
+        working_scores=working_scores,
+        agent_ids=rep_agents,
+        topic_ids=topic_ids,
+        agent_definitions=agent_definitions,
+        llm_command=llm_command,
+        llm_timeout=llm_timeout,
+        service_scope=service_scope,
+        stages=stages,
+        max_rounds=max_rounds,
+        threshold=threshold,
+    )
 
-    silo_defs = {k: v for k, v in agent_definitions.items() if k in rep_agents}
-
-    prev_flat: dict[str, float] = {}
-    discussion: list[dict] = []
-    rounds_executed = 0
-    converged = False
-
-    for round_no in range(1, max_rounds + 1):
-        ranked = _build_ranked_from_scores(topic_ids, working_scores)
-
-        score_updates, decisions, summaries, actions, meta = llm_deliberation_round(
-            round_no=round_no,
-            stages=stages,
-            service_scope=service_scope,
-            states=topic_catalog,
-            working_scores=working_scores,
-            ranked=ranked,
-            previous_decisions=[],
-            previous_discussion=discussion,
-            command=llm_command,
-            timeout=llm_timeout,
-            agent_definitions=silo_defs,
-            known_agent_ids=set(rep_agents),
-        )
-
-        for tid, per_agent in score_updates.items():
-            if tid not in working_scores:
-                continue
-            for agent_name, delta in per_agent.items():
-                key = _agent_score_key(agent_name)
-                if key in working_scores[tid]:
-                    working_scores[tid][key] = max(0.0, min(10.0, working_scores[tid][key] + delta))
-
-        if summaries:
-            discussion.extend(summaries)
-        rounds_executed = round_no
-
-        curr_flat = _flatten_scores(working_scores)
-        if is_converged(prev_flat, curr_flat, threshold):
-            converged = True
-            break
-        prev_flat = curr_flat
-
-    # Aggregate to per-topic float
+    # Aggregate to per-topic float for silo result
     topic_scores_flat: dict[str, float] = {}
-    for tid, per_agent in working_scores.items():
+    for tid, per_agent in final_scores.items():
         vals = [v for v in per_agent.values() if isinstance(v, (int, float))]
         topic_scores_flat[tid] = round(sum(vals) / len(vals), 4) if vals else 0.0
 
