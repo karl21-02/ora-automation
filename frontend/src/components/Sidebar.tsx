@@ -1,41 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { listReports } from '../lib/api'
-import { APP_NAME } from '../lib/constants'
-import type { Conversation, Organization, ReportListItem } from '../types'
-
-type DateGroup = 'Today' | 'Yesterday' | 'Previous 7 Days' | 'Previous 30 Days' | 'Older'
-
-const DATE_GROUP_ORDER: DateGroup[] = [
-  'Today',
-  'Yesterday',
-  'Previous 7 Days',
-  'Previous 30 Days',
-  'Older',
-]
-
-function getDateGroup(date: Date): DateGroup {
-  const now = new Date()
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const diff = startOfToday.getTime() - new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-  const days = diff / (1000 * 60 * 60 * 24)
-
-  if (days < 0 || days === 0) return 'Today'
-  if (days === 1) return 'Yesterday'
-  if (days <= 7) return 'Previous 7 Days'
-  if (days <= 30) return 'Previous 30 Days'
-  return 'Older'
-}
-
-function groupConversations(convs: Conversation[]): Map<DateGroup, Conversation[]> {
-  const groups = new Map<DateGroup, Conversation[]>()
-  for (const conv of convs) {
-    const group = getDateGroup(conv.createdAt)
-    const list = groups.get(group) ?? []
-    list.push(conv)
-    groups.set(group, list)
-  }
-  return groups
-}
+import type { Conversation, Organization } from '../types'
+import { useSidebarState } from '../lib/hooks/useSidebarState'
+import { MAIN_MENU_ITEMS, BOTTOM_MENU_ITEMS, type MenuId } from '../lib/sidebarConfig'
+import { SidebarHeader } from './sidebar/SidebarHeader'
+import { SidebarItem } from './sidebar/SidebarItem'
+import ChatList from './ChatList'
+import ReportList from './ReportList'
 
 interface Props {
   conversations: Conversation[]
@@ -45,7 +14,8 @@ interface Props {
   onSelectReport: (filename: string) => void
   onDeleteConversation: (id: string) => void
   onRenameConversation: (id: string, title: string) => void
-  onOpenOrgs?: () => void
+  activeMenu: MenuId
+  onMenuChange: (menu: MenuId) => void
   orgs: Organization[]
 }
 
@@ -57,336 +27,67 @@ export default function Sidebar({
   onSelectReport,
   onDeleteConversation,
   onRenameConversation,
-  onOpenOrgs,
+  activeMenu,
+  onMenuChange,
   orgs,
 }: Props) {
-  const [reports, setReports] = useState<ReportListItem[]>([])
-  const [tab, setTab] = useState<'chats' | 'reports' | 'orgs'>('chats')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingTitle, setEditingTitle] = useState('')
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-  const editInputRef = useRef<HTMLInputElement>(null)
+  const { isCollapsed, toggle } = useSidebarState()
 
-  useEffect(() => {
-    if (tab === 'reports') {
-      listReports()
-        .then(setReports)
-        .catch(() => setReports([]))
-    }
-  }, [tab])
-
-  useEffect(() => {
-    if (editingId && editInputRef.current) {
-      editInputRef.current.focus()
-      editInputRef.current.select()
-    }
-  }, [editingId])
-
-  const filtered = useMemo(() => {
-    if (!searchQuery.trim()) return conversations
-    const q = searchQuery.toLowerCase()
-    return conversations.filter(
-      (c) =>
-        (c.title || 'New conversation').toLowerCase().includes(q)
-    )
-  }, [conversations, searchQuery])
-
-  const grouped = useMemo(() => groupConversations(filtered), [filtered])
-
-  // Org-based grouping: org → date → conversations
-  const orgGrouped = useMemo(() => {
-    if (orgs.length === 0) return null // fallback to flat date grouping
-    type OrgBucket = { orgId: string | null; orgName: string; convs: Conversation[] }
-    const buckets = new Map<string, OrgBucket>()
-
-    for (const conv of filtered) {
-      const key = conv.orgId ?? '__none__'
-      if (!buckets.has(key)) {
-        const orgName = conv.orgId
-          ? (conv.orgName ?? orgs.find((o) => o.id === conv.orgId)?.name ?? conv.orgId)
-          : '미분류'
-        buckets.set(key, { orgId: conv.orgId ?? null, orgName, convs: [] })
-      }
-      buckets.get(key)!.convs.push(conv)
-    }
-
-    // Sort: named orgs first (alphabetically), 미분류 last
-    const sorted = [...buckets.values()].sort((a, b) => {
-      if (a.orgId === null) return 1
-      if (b.orgId === null) return -1
-      return a.orgName.localeCompare(b.orgName)
-    })
-    return sorted
-  }, [filtered, orgs])
-
-  const startRename = (id: string, currentTitle: string) => {
-    setEditingId(id)
-    setEditingTitle(currentTitle || '')
-    setDeleteConfirmId(null)
-  }
-
-  const commitRename = () => {
-    if (editingId && editingTitle.trim()) {
-      onRenameConversation(editingId, editingTitle.trim())
-    }
-    setEditingId(null)
-    setEditingTitle('')
-  }
-
-  const cancelRename = () => {
-    setEditingId(null)
-    setEditingTitle('')
+  const handleMenuClick = (menuId: MenuId) => {
+    onMenuChange(menuId)
   }
 
   return (
-    <div style={{
-      width: 260,
-      minWidth: 260,
-      height: '100%',
-      borderRight: '1px solid #e5e7eb',
-      display: 'flex',
-      flexDirection: 'column',
-      backgroundColor: '#f9fafb',
-    }}>
+    <div className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
       {/* Header */}
-      <div style={{
-        padding: '16px 12px 8px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
-        <span style={{ fontWeight: 700, fontSize: 16, color: '#1f2937' }}>
-          {APP_NAME}
-        </span>
-        <button
-          onClick={() => onNewConversation()}
-          title="New Chat"
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 6,
-            border: '1px solid #d1d5db',
-            backgroundColor: '#fff',
-            cursor: 'pointer',
-            fontWeight: 500,
-            fontSize: 16,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#374151',
-            lineHeight: 1,
-          }}
-        >
-          +
-        </button>
-      </div>
+      <SidebarHeader
+        isCollapsed={isCollapsed}
+        onToggle={toggle}
+        onNewChat={() => onNewConversation()}
+      />
 
-      {/* Tabs */}
-      <div style={{
-        display: 'flex',
-        borderBottom: '1px solid #e5e7eb',
-      }}>
-        {(['chats', 'reports', 'orgs'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => {
-              setTab(t)
-              if (t === 'orgs' && onOpenOrgs) onOpenOrgs()
-            }}
-            style={{
-              flex: 1,
-              padding: '8px 0',
-              border: 'none',
-              backgroundColor: 'transparent',
-              borderBottom: tab === t ? '2px solid #2563eb' : '2px solid transparent',
-              color: tab === t ? '#2563eb' : '#6b7280',
-              fontWeight: 500,
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            {t === 'chats' ? 'Chats' : t === 'reports' ? 'Reports' : 'Orgs'}
-          </button>
-        ))}
-      </div>
-
-      {/* Search (chats tab only) */}
-      {tab === 'chats' && (
-        <div style={{ padding: '8px 12px 0' }}>
-          <input
-            className="sidebar-search-input"
-            type="text"
-            placeholder="Search..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+      {/* Main Navigation */}
+      <nav className="sidebar-nav">
+        {MAIN_MENU_ITEMS.map((item) => (
+          <SidebarItem
+            key={item.id}
+            icon={item.icon}
+            label={item.label}
+            isActive={activeMenu === item.id}
+            isCollapsed={isCollapsed}
+            onClick={() => handleMenuClick(item.id as MenuId)}
           />
-        </div>
+        ))}
+      </nav>
+
+      {/* Content Area (hidden when collapsed) */}
+      {!isCollapsed && activeMenu === 'chats' && (
+        <ChatList
+          conversations={conversations}
+          activeConversationId={activeConversationId}
+          onSelectConversation={onSelectConversation}
+          onDeleteConversation={onDeleteConversation}
+          onRenameConversation={onRenameConversation}
+          orgs={orgs}
+        />
       )}
 
-      {/* List */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '4px 0' }}>
-        {tab === 'chats' && (() => {
-          const renderConvItem = (conv: Conversation) => (
-            <div key={conv.id}>
-              <div
-                className={`sidebar-conv-item${conv.id === activeConversationId ? ' active' : ''}`}
-                onClick={() => {
-                  onSelectConversation(conv.id)
-                  setDeleteConfirmId(null)
-                }}
-              >
-                {editingId === conv.id ? (
-                  <input
-                    ref={editInputRef}
-                    className="sidebar-search-input"
-                    value={editingTitle}
-                    onChange={(e) => setEditingTitle(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') commitRename()
-                      if (e.key === 'Escape') cancelRename()
-                    }}
-                    onBlur={commitRename}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ padding: '2px 6px', fontSize: 13 }}
-                  />
-                ) : (
-                  <>
-                    <span style={{
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      flex: 1,
-                    }}>
-                      {conv.title || 'New conversation'}
-                    </span>
-                    <span className="conv-actions">
-                      <button
-                        title="Rename"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          startRename(conv.id, conv.title)
-                        }}
-                      >
-                        &#9998;
-                      </button>
-                      <button
-                        title="Delete"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setDeleteConfirmId(
-                            deleteConfirmId === conv.id ? null : conv.id
-                          )
-                        }}
-                      >
-                        &#128465;
-                      </button>
-                    </span>
-                  </>
-                )}
-              </div>
-              {deleteConfirmId === conv.id && (
-                <div className="sidebar-delete-confirm">
-                  <div style={{ marginBottom: 4 }}>Delete this conversation?</div>
-                  <button
-                    className="btn-delete"
-                    onClick={() => {
-                      onDeleteConversation(conv.id)
-                      setDeleteConfirmId(null)
-                    }}
-                  >
-                    Delete
-                  </button>
-                  <button
-                    className="btn-cancel"
-                    onClick={() => setDeleteConfirmId(null)}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
-          )
+      {!isCollapsed && activeMenu === 'reports' && (
+        <ReportList onSelectReport={onSelectReport} />
+      )}
 
-          const renderDateGroup = (convs: Conversation[], indent = false) => {
-            const dateGrouped = groupConversations(convs)
-            return DATE_GROUP_ORDER.map((group) => {
-              const items = dateGrouped.get(group)
-              if (!items || items.length === 0) return null
-              return (
-                <div key={group} style={indent ? { paddingLeft: 8 } : undefined}>
-                  <div className="sidebar-section-label">{group}</div>
-                  {items.map(renderConvItem)}
-                </div>
-              )
-            })
-          }
-
-          // Org-grouped mode
-          if (orgGrouped) {
-            return orgGrouped.map((bucket) => (
-              <div key={bucket.orgId ?? '__none__'}>
-                <div style={{
-                  padding: '8px 12px 2px',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: '#6b7280',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}>
-                  <span>{bucket.orgId ? '\u{1F3E2}' : '\u{1F4CE}'}</span>
-                  <span>{bucket.orgName}</span>
-                </div>
-                {renderDateGroup(bucket.convs, true)}
-              </div>
-            ))
-          }
-
-          // Flat date grouping fallback
-          return DATE_GROUP_ORDER.map((group) => {
-            const items = grouped.get(group)
-            if (!items || items.length === 0) return null
-            return (
-              <div key={group}>
-                <div className="sidebar-section-label">{group}</div>
-                {items.map(renderConvItem)}
-              </div>
-            )
-          })
-        })()}
-
-        {tab === 'chats' && filtered.length === 0 && (
-          <div style={{ padding: '16px 12px', color: '#9ca3af', fontSize: 13 }}>
-            {searchQuery ? 'No matching conversations' : 'No conversations'}
-          </div>
-        )}
-
-        {tab === 'reports' && reports.map((r) => (
-          <div
-            key={r.filename}
-            onClick={() => onSelectReport(r.filename)}
-            className="sidebar-conv-item"
-            title={r.filename}
-          >
-            <div style={{ overflow: 'hidden' }}>
-              <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {r.filename.split('/').pop()}
-              </div>
-              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
-                {r.report_type} &middot; {(r.size_bytes / 1024).toFixed(1)}KB
-              </div>
-            </div>
-          </div>
+      {/* Bottom Navigation */}
+      <div className="sidebar-bottom">
+        {BOTTOM_MENU_ITEMS.map((item) => (
+          <SidebarItem
+            key={item.id}
+            icon={item.icon}
+            label={item.label}
+            isActive={activeMenu === item.id}
+            isCollapsed={isCollapsed}
+            onClick={() => handleMenuClick(item.id as MenuId)}
+          />
         ))}
-
-        {tab === 'reports' && reports.length === 0 && (
-          <div style={{ padding: '16px 12px', color: '#9ca3af', fontSize: 13 }}>
-            No reports found
-          </div>
-        )}
       </div>
     </div>
   )

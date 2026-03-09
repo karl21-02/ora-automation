@@ -2,8 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import ChatWindow from './components/ChatWindow'
 import OrgPanel from './components/OrgPanel'
 import ReportViewer from './components/ReportViewer'
+import SchedulerPanel from './components/SchedulerPanel'
+import SettingsPanel from './components/SettingsPanel'
 import Sidebar from './components/Sidebar'
 import { createConversation, deleteConversation, getConversation, listConversations, listOrgs, renameConversation, updateConversationOrg } from './lib/api'
+import type { MenuId } from './lib/sidebarConfig'
 import type { Conversation, Message, Organization } from './types'
 
 const ACTIVE_KEY = 'ora-chatbot-active-id'
@@ -23,7 +26,7 @@ export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeId, setActiveId] = useState<string>('')
   const [reportFile, setReportFile] = useState<string | null>(null)
-  const [showOrgs, setShowOrgs] = useState(false)
+  const [activeMenu, setActiveMenu] = useState<MenuId>('chats')
   const [dbReady, setDbReady] = useState(false)
   const [orgs, setOrgs] = useState<Organization[]>([])
 
@@ -234,17 +237,16 @@ export default function App() {
       <Sidebar
         conversations={conversations}
         activeConversationId={activeId}
-        onSelectConversation={(id) => { setShowOrgs(false); setActiveId(id) }}
-        onNewConversation={(orgId) => { setShowOrgs(false); handleNewConversation(orgId) }}
-        onSelectReport={(f) => { setShowOrgs(false); setReportFile(f) }}
+        onSelectConversation={(id) => { setActiveMenu('chats'); setActiveId(id) }}
+        onNewConversation={(orgId) => { setActiveMenu('chats'); handleNewConversation(orgId) }}
+        onSelectReport={(f) => { setReportFile(f) }}
         onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}
-        onOpenOrgs={() => setShowOrgs(true)}
+        activeMenu={activeMenu}
+        onMenuChange={setActiveMenu}
         orgs={orgs}
       />
-      {showOrgs ? (
-        <OrgPanel onOrgsChanged={refreshOrgs} />
-      ) : (
+      {activeMenu === 'chats' && (
         <ChatWindow
           key={activeConv.id}
           messages={activeConv.messages}
@@ -256,6 +258,20 @@ export default function App() {
           orgs={orgs}
           onChangeOrg={(orgId) => handleChangeConversationOrg(activeConv.id, orgId)}
         />
+      )}
+      {activeMenu === 'reports' && (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
+          Select a report from the sidebar
+        </div>
+      )}
+      {activeMenu === 'orgs' && (
+        <OrgPanel onOrgsChanged={refreshOrgs} />
+      )}
+      {activeMenu === 'scheduler' && (
+        <SchedulerPanel />
+      )}
+      {activeMenu === 'settings' && (
+        <SettingsPanel />
       )}
       {reportFile && (
         <ReportViewer

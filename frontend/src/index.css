@@ -1,3 +1,17 @@
+/* ── CSS Variables ─────────────────────────────────────────────── */
+:root {
+  --sidebar-width-expanded: 260px;
+  --sidebar-width-collapsed: 64px;
+  --sidebar-transition: 0.2s ease;
+  --sidebar-bg: #f9fafb;
+  --sidebar-border: #e5e7eb;
+  --sidebar-text: #374151;
+  --sidebar-text-muted: #9ca3af;
+  --sidebar-hover-bg: #f3f4f6;
+  --sidebar-active-bg: #e5e7eb;
+  --sidebar-accent: #2563eb;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -190,4 +204,151 @@ body {
 
 .sidebar-delete-confirm .btn-cancel:hover {
   background-color: #d1d5db;
+}
+
+/* ── Collapsible Sidebar ───────────────────────────────────────── */
+
+.sidebar {
+  width: var(--sidebar-width-expanded);
+  min-width: var(--sidebar-width-expanded);
+  height: 100%;
+  border-right: 1px solid var(--sidebar-border);
+  display: flex;
+  flex-direction: column;
+  background-color: var(--sidebar-bg);
+  transition: width var(--sidebar-transition), min-width var(--sidebar-transition);
+}
+
+.sidebar.collapsed {
+  width: var(--sidebar-width-collapsed);
+  min-width: var(--sidebar-width-collapsed);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--sidebar-border);
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  margin: 2px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--sidebar-text);
+  background: transparent;
+  border: none;
+  text-align: left;
+  width: calc(100% - 16px);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-nav-item:hover {
+  background-color: var(--sidebar-hover-bg);
+}
+
+.sidebar-nav-item.active {
+  background-color: var(--sidebar-active-bg);
+  color: var(--sidebar-accent);
+}
+
+.sidebar-nav-item .nav-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-nav-item .nav-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Collapsed nav items */
+.sidebar.collapsed .sidebar-nav-item {
+  justify-content: center;
+  padding: 10px 0;
+  margin: 2px 4px;
+  width: calc(100% - 8px);
+}
+
+.sidebar.collapsed .nav-label {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-content {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-header-title {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-header-actions {
+  justify-content: center;
+  width: 100%;
+}
+
+/* Sidebar header */
+.sidebar-header {
+  padding: 16px 12px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar.collapsed .sidebar-header {
+  padding: 16px 8px 8px;
+  justify-content: center;
+}
+
+.sidebar-header-title {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--sidebar-text);
+}
+
+.sidebar-header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.sidebar-icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--sidebar-border);
+  background-color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sidebar-text);
+  transition: background-color 0.15s ease;
+}
+
+.sidebar-icon-btn:hover {
+  background-color: var(--sidebar-hover-bg);
+}
+
+/* Sidebar content area */
+.sidebar-content {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Bottom section */
+.sidebar-bottom {
+  margin-top: auto;
+  border-top: 1px solid var(--sidebar-border);
+  padding: 4px 0;
 }
