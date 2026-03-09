@@ -353,13 +353,85 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
         {messages.length === 0 && (
           <div style={{
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
             height: '100%',
-            color: '#9ca3af',
-            fontSize: 15,
+            padding: '24px',
+            textAlign: 'center',
           }}>
-            Start a conversation with {APP_NAME}
+            <div style={{
+              fontSize: 48,
+              marginBottom: 16,
+            }}>
+              👋
+            </div>
+            <h2 style={{
+              fontSize: 20,
+              fontWeight: 600,
+              color: '#1f2937',
+              marginBottom: 8,
+            }}>
+              {APP_NAME}에 오신 것을 환영합니다
+            </h2>
+            <p style={{
+              fontSize: 14,
+              color: '#6b7280',
+              marginBottom: 24,
+              maxWidth: 400,
+            }}>
+              R&D 분석, E2E 테스트, QA 프로그램 등 다양한 자동화 작업을 수행할 수 있습니다.
+            </p>
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              width: '100%',
+              maxWidth: 400,
+            }}>
+              <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>
+                예시로 시작해보세요:
+              </p>
+              {[
+                { icon: '🔬', text: 'Ora 프로젝트 R&D 분석 해줘' },
+                { icon: '🧪', text: 'OraAiServer E2E 테스트 실행해줘' },
+                { icon: '📊', text: '최근 보안 트렌드 분석해줘' },
+                { icon: '🤖', text: 'AI 에이전트 아키텍처 리서치해줘' },
+              ].map(({ icon, text }) => (
+                <button
+                  key={text}
+                  onClick={() => {
+                    setInput(text)
+                    setTimeout(() => handleSend(text), 100)
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '12px 16px',
+                    borderRadius: 10,
+                    border: '1px solid #e5e7eb',
+                    backgroundColor: '#fff',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontSize: 14,
+                    color: '#374151',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#f9fafb'
+                    e.currentTarget.style.borderColor = '#d1d5db'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fff'
+                    e.currentTarget.style.borderColor = '#e5e7eb'
+                  }}
+                >
+                  <span style={{ fontSize: 18 }}>{icon}</span>
+                  <span>{text}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {messages.map((msg, idx) => {
@@ -528,48 +600,88 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
         borderTop: '1px solid #e5e7eb',
         padding: '12px 16px',
         display: 'flex',
-        gap: 8,
+        flexDirection: 'column',
+        gap: 6,
       }}>
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
-          rows={1}
-          style={{
-            flex: 1,
-            padding: '10px 14px',
-            borderRadius: 8,
-            border: '1px solid #d1d5db',
-            resize: 'none',
-            fontSize: 14,
-            lineHeight: 1.5,
-            outline: 'none',
-            fontFamily: 'inherit',
-          }}
-          onInput={(e) => {
-            const el = e.target as HTMLTextAreaElement
-            el.style.height = 'auto'
-            el.style.height = Math.min(el.scrollHeight, 120) + 'px'
-          }}
-        />
-        <button
-          onClick={() => handleSend()}
-          disabled={!input.trim() || loading}
-          style={{
-            padding: '10px 20px',
-            borderRadius: 8,
-            border: 'none',
-            backgroundColor: (!input.trim() || loading) ? '#d1d5db' : '#2563eb',
-            color: '#fff',
-            fontWeight: 600,
-            fontSize: 14,
-            cursor: (!input.trim() || loading) ? 'not-allowed' : 'pointer',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          Send
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="메시지를 입력하세요..."
+            rows={1}
+            style={{
+              flex: 1,
+              padding: '10px 14px',
+              borderRadius: 8,
+              border: '1px solid #d1d5db',
+              resize: 'none',
+              fontSize: 14,
+              lineHeight: 1.5,
+              outline: 'none',
+              fontFamily: 'inherit',
+              transition: 'border-color 0.15s, box-shadow 0.15s',
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = '#2563eb'
+              e.currentTarget.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.1)'
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = '#d1d5db'
+              e.currentTarget.style.boxShadow = 'none'
+            }}
+            onInput={(e) => {
+              const el = e.target as HTMLTextAreaElement
+              el.style.height = 'auto'
+              el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+            }}
+          />
+          <button
+            onClick={() => handleSend()}
+            disabled={!input.trim() || loading}
+            style={{
+              padding: '10px 20px',
+              borderRadius: 8,
+              border: 'none',
+              backgroundColor: (!input.trim() || loading) ? '#d1d5db' : '#2563eb',
+              color: '#fff',
+              fontWeight: 600,
+              fontSize: 14,
+              cursor: (!input.trim() || loading) ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'background-color 0.15s',
+            }}
+          >
+            전송
+          </button>
+        </div>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          fontSize: 11,
+          color: '#9ca3af',
+          padding: '0 4px',
+        }}>
+          <span>
+            <kbd style={{
+              padding: '1px 4px',
+              backgroundColor: '#f3f4f6',
+              borderRadius: 3,
+              border: '1px solid #e5e7eb',
+              fontSize: 10,
+            }}>Enter</kbd> 전송 · <kbd style={{
+              padding: '1px 4px',
+              backgroundColor: '#f3f4f6',
+              borderRadius: 3,
+              border: '1px solid #e5e7eb',
+              fontSize: 10,
+            }}>Shift+Enter</kbd> 줄바꿈
+          </span>
+          <span style={{ color: input.length > 2000 ? '#ef4444' : '#9ca3af' }}>
+            {input.length.toLocaleString()} / 2,000
+          </span>
+        </div>
       </div>
 
       {/* Guest Agent Picker Modal */}
