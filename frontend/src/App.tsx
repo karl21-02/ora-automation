@@ -10,6 +10,7 @@ import { createConversation, deleteConversation, getConversation, listConversati
 import { useKeyboardShortcuts } from './lib/hooks/useKeyboardShortcuts'
 import { useIsMobile } from './lib/hooks/useMediaQuery'
 import { useRunningCount } from './lib/hooks/useRunningCount'
+import { useSidebarResize } from './lib/hooks/useSidebarResize'
 import { useSidebarState } from './lib/hooks/useSidebarState'
 import { MENU_ITEMS, type MenuId } from './lib/sidebarConfig'
 import type { Conversation, Message, Organization } from './types'
@@ -39,6 +40,7 @@ export default function App() {
   const runningCount = useRunningCount()
   const isMobile = useIsMobile()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const { width: sidebarWidth, handleMouseDown: handleResizeStart } = useSidebarResize()
 
   // Close mobile sidebar when switching away from mobile view
   useEffect(() => {
@@ -300,6 +302,8 @@ export default function App() {
         badges={{ scheduler: runningCount }}
         isMobile={isMobile}
         mobileOpen={mobileOpen}
+        width={sidebarWidth}
+        onResizeStart={handleResizeStart}
       />
       {activeMenu === 'chats' && (
         <ChatWindow

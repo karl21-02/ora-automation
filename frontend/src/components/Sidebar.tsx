@@ -23,6 +23,8 @@ interface Props {
   badges?: Partial<Record<MenuId, number>>
   isMobile?: boolean
   mobileOpen?: boolean
+  width?: number
+  onResizeStart?: (e: React.MouseEvent) => void
 }
 
 export default function Sidebar({
@@ -42,6 +44,8 @@ export default function Sidebar({
   badges = {},
   isMobile = false,
   mobileOpen = false,
+  width = 260,
+  onResizeStart,
 }: Props) {
   const handleMenuClick = (menuId: MenuId) => {
     onMenuChange(menuId)
@@ -52,8 +56,15 @@ export default function Sidebar({
   if (isCollapsed && !isMobile) classNames.push('collapsed')
   if (isMobile && mobileOpen) classNames.push('mobile-open')
 
+  // Dynamic width style (only when not collapsed and not on mobile)
+  const sidebarStyle: React.CSSProperties = {}
+  if (!isCollapsed && !isMobile) {
+    sidebarStyle.width = width
+    sidebarStyle.minWidth = width
+  }
+
   return (
-    <div className={classNames.join(' ')}>
+    <div className={classNames.join(' ')} style={sidebarStyle}>
       {/* Header */}
       <SidebarHeader
         isCollapsed={isCollapsed}
@@ -107,6 +118,14 @@ export default function Sidebar({
           />
         ))}
       </div>
+
+      {/* Resize Handle (desktop only, when not collapsed) */}
+      {!isMobile && !isCollapsed && onResizeStart && (
+        <div
+          className="sidebar-resize-handle"
+          onMouseDown={onResizeStart}
+        />
+      )}
     </div>
   )
 }

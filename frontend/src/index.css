@@ -209,6 +209,7 @@ body {
 /* ── Collapsible Sidebar ───────────────────────────────────────── */
 
 .sidebar {
+  position: relative;
   width: var(--sidebar-width-expanded);
   min-width: var(--sidebar-width-expanded);
   height: 100%;
@@ -486,6 +487,34 @@ body {
 
 .sidebar-icon-btn:active svg {
   transform: scale(0.9);
+}
+
+/* ── Sidebar Resize Handle ────────────────────────────────────────── */
+
+.sidebar-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background-color 0.15s ease;
+  z-index: 10;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.dragging {
+  background-color: var(--sidebar-accent);
+}
+
+.sidebar-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
 }
 
 /* ── Responsive / Mobile ──────────────────────────────────────────── */
