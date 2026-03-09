@@ -979,24 +979,30 @@ def _to_convergence_state(
             discussion=sr.get("discussion", []),
         ))
 
-    # Parse decisions
+    # Parse decisions with validation
     decisions: list[OrchestrationDecision] = []
     for d in result.get("decisions", []):
-        if isinstance(d, dict):
-            decisions.append(OrchestrationDecision(
-                decision_id=d.get("decision_id", ""),
-                owner=d.get("owner", ""),
-                rationale=d.get("rationale", ""),
-                risk=d.get("risk", ""),
-                next_action=d.get("next_action", ""),
-                due=d.get("due", ""),
-                topic_id=d.get("topic_id", ""),
-                topic_name=d.get("topic_name", ""),
-                service=d.get("service", []),
-                score_delta=float(d.get("score_delta", 0.0)),
-                confidence=float(d.get("confidence", 0.0)),
-                fail_label=d.get("fail_label", ""),
-            ))
+        if not isinstance(d, dict):
+            logger.warning("Skipping non-dict decision: %s", type(d).__name__)
+            continue
+        # Require at least decision_id and owner
+        if not d.get("decision_id") or not d.get("owner"):
+            logger.warning("Skipping decision missing required fields: %s", d)
+            continue
+        decisions.append(OrchestrationDecision(
+            decision_id=d.get("decision_id", ""),
+            owner=d.get("owner", ""),
+            rationale=d.get("rationale", ""),
+            risk=d.get("risk", ""),
+            next_action=d.get("next_action", ""),
+            due=d.get("due", ""),
+            topic_id=d.get("topic_id", ""),
+            topic_name=d.get("topic_name", ""),
+            service=d.get("service", []),
+            score_delta=float(d.get("score_delta", 0.0)),
+            confidence=float(d.get("confidence", 0.0)),
+            fail_label=d.get("fail_label", ""),
+        ))
 
     return ConvergencePipelineState(
         level1_results=level1_results,
