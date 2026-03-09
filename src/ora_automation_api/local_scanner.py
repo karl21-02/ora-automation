@@ -106,7 +106,7 @@ def normalize_github_url(url: str) -> str:
     if not url:
         return ""
 
-    normalized = url.strip()
+    normalized = url.strip().lower()
 
     # SSH format: git@github.com:owner/repo.git
     if normalized.startswith("git@github.com:"):
@@ -123,7 +123,7 @@ def normalize_github_url(url: str) -> str:
     # Remove trailing slash
     normalized = normalized.rstrip("/")
 
-    return normalized.lower()
+    return normalized
 
 
 def is_github_url(url: str | None) -> bool:
