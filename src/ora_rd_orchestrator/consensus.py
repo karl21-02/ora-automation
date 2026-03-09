@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from .config import (
+    CONSENSUS_FUZZY_MATCH_THRESHOLD,
     LLM_CONSENSUS_CMD_ENV,
     LLM_CONSENSUS_TIMEOUT_SECONDS,
 )
@@ -137,14 +138,14 @@ def apply_hybrid_consensus(
         normed = raw_id.lower().replace("-", "_").replace(" ", "_")
         if normed in _norm_to_id:
             return _norm_to_id[normed]
-        # Fuzzy match as last resort (threshold 0.8)
+        # Fuzzy match as last resort
         best_match, best_score = "", 0.0
         for norm_key, real_id in _norm_to_id.items():
             score = SequenceMatcher(None, normed, norm_key).ratio()
             if score > best_score:
                 best_score = score
                 best_match = real_id
-        if best_score >= 0.8:
+        if best_score >= CONSENSUS_FUZZY_MATCH_THRESHOLD:
             logger.info("Fuzzy-matched consensus topic ID '%s' → '%s' (%.2f)", raw_id, best_match, best_score)
             return best_match
         return None

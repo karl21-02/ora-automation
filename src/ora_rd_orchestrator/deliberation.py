@@ -18,6 +18,8 @@ from .config import (
     PIPELINE_FAIL_LABEL_RETRY,
     PIPELINE_FAIL_LABEL_SKIP,
     PIPELINE_FAIL_LABEL_STOP,
+    RISK_THRESHOLD_HIGH,
+    RISK_THRESHOLD_MEDIUM,
     _normalize_services,
 )
 from .llm_client import run_llm_command
@@ -42,9 +44,9 @@ def _clamp_score(value: float, lo: float = 0.0, hi: float = 10.0) -> float:
 # ---------------------------------------------------------------------------
 
 def _to_risk_label(value: float) -> str:
-    if value >= 8.0:
+    if value >= RISK_THRESHOLD_HIGH:
         return "high"
-    if value >= 6.0:
+    if value >= RISK_THRESHOLD_MEDIUM:
         return "medium"
     return "low"
 
