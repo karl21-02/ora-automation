@@ -47,6 +47,9 @@ ALLOWED_ENV_KEYS = {
     "E2E_FAIL_FAST",
     "E2E_FORCE_CYPRESS",
     "E2E_PYTEST_ARGS",
+    # Project integration
+    "PROJECT_ID",
+    "WORKSPACE",
 }
 
 
