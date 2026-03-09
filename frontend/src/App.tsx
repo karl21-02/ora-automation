@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import ChatWindow from './components/ChatWindow'
 import OrgPanel from './components/OrgPanel'
 import ReportViewer from './components/ReportViewer'
@@ -6,7 +6,9 @@ import SchedulerPanel from './components/SchedulerPanel'
 import SettingsPanel from './components/SettingsPanel'
 import Sidebar from './components/Sidebar'
 import { createConversation, deleteConversation, getConversation, listConversations, listOrgs, renameConversation, updateConversationOrg } from './lib/api'
-import type { MenuId } from './lib/sidebarConfig'
+import { useKeyboardShortcuts } from './lib/hooks/useKeyboardShortcuts'
+import { useSidebarState } from './lib/hooks/useSidebarState'
+import { MENU_ITEMS, type MenuId } from './lib/sidebarConfig'
 import type { Conversation, Message, Organization } from './types'
 
 const ACTIVE_KEY = 'ora-chatbot-active-id'
@@ -29,10 +31,27 @@ export default function App() {
   const [activeMenu, setActiveMenu] = useState<MenuId>('chats')
   const [dbReady, setDbReady] = useState(false)
   const [orgs, setOrgs] = useState<Organization[]>([])
+  const { isCollapsed, toggle: toggleSidebar } = useSidebarState()
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   const refreshOrgs = useCallback(() => {
     listOrgs().then(({ items }) => setOrgs(items)).catch(() => setOrgs([]))
   }, [])
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    onToggleSidebar: toggleSidebar,
+    onNewChat: () => handleNewConversation(),
+    onFocusSearch: () => {
+      if (isCollapsed) toggleSidebar()
+      setActiveMenu('chats')
+      setTimeout(() => searchInputRef.current?.focus(), 100)
+    },
+    onNavigateMenu: (index) => {
+      const menu = MENU_ITEMS[index]
+      if (menu) setActiveMenu(menu.id as MenuId)
+    },
+  })
 
   // Load conversations from DB on mount
   useEffect(() => {
@@ -245,6 +264,9 @@ export default function App() {
         activeMenu={activeMenu}
         onMenuChange={setActiveMenu}
         orgs={orgs}
+        isCollapsed={isCollapsed}
+        onToggle={toggleSidebar}
+        searchInputRef={searchInputRef}
       />
       {activeMenu === 'chats' && (
         <ChatWindow

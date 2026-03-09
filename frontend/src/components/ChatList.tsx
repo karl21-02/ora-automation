@@ -1,3 +1,4 @@
+import type { RefObject } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Conversation, Organization } from '../types'
 
@@ -42,6 +43,7 @@ interface Props {
   onDeleteConversation: (id: string) => void
   onRenameConversation: (id: string, title: string) => void
   orgs: Organization[]
+  searchInputRef?: RefObject<HTMLInputElement | null>
 }
 
 export default function ChatList({
@@ -51,6 +53,7 @@ export default function ChatList({
   onDeleteConversation,
   onRenameConversation,
   orgs,
+  searchInputRef,
 }: Props) {
   const [searchQuery, setSearchQuery] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -216,9 +219,10 @@ export default function ChatList({
       {/* Search */}
       <div style={{ padding: '8px 12px 0' }}>
         <input
+          ref={searchInputRef}
           className="sidebar-search-input"
           type="text"
-          placeholder="Search..."
+          placeholder="Search... (⌘K)"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />

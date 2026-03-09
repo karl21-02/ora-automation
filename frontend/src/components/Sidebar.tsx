@@ -1,5 +1,5 @@
+import type { RefObject } from 'react'
 import type { Conversation, Organization } from '../types'
-import { useSidebarState } from '../lib/hooks/useSidebarState'
 import { MAIN_MENU_ITEMS, BOTTOM_MENU_ITEMS, type MenuId } from '../lib/sidebarConfig'
 import { SidebarHeader } from './sidebar/SidebarHeader'
 import { SidebarItem } from './sidebar/SidebarItem'
@@ -17,6 +17,9 @@ interface Props {
   activeMenu: MenuId
   onMenuChange: (menu: MenuId) => void
   orgs: Organization[]
+  isCollapsed: boolean
+  onToggle: () => void
+  searchInputRef: RefObject<HTMLInputElement | null>
 }
 
 export default function Sidebar({
@@ -30,9 +33,10 @@ export default function Sidebar({
   activeMenu,
   onMenuChange,
   orgs,
+  isCollapsed,
+  onToggle,
+  searchInputRef,
 }: Props) {
-  const { isCollapsed, toggle } = useSidebarState()
-
   const handleMenuClick = (menuId: MenuId) => {
     onMenuChange(menuId)
   }
@@ -42,7 +46,7 @@ export default function Sidebar({
       {/* Header */}
       <SidebarHeader
         isCollapsed={isCollapsed}
-        onToggle={toggle}
+        onToggle={onToggle}
         onNewChat={() => onNewConversation()}
       />
 
@@ -69,6 +73,7 @@ export default function Sidebar({
           onDeleteConversation={onDeleteConversation}
           onRenameConversation={onRenameConversation}
           orgs={orgs}
+          searchInputRef={searchInputRef}
         />
       )}
 
