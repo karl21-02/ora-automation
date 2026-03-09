@@ -317,4 +317,6 @@ make qa-program
 
 - Follow [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <subject>`
 - Do NOT append `Co-Authored-By` lines to commit messages
+- Do NOT add "🤖 Generated with Claude Code" or similar AI attribution messages
+- Keep commit messages clean and focused on the actual changes
 - See [docs/GITHUB_WORKFLOW.md](docs/GITHUB_WORKFLOW.md) for full branch/PR/review rules
