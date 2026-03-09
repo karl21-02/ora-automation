@@ -34,6 +34,7 @@ from .types import (
     SiloDeliberationResult,
     TopicState,
 )
+from .report_builder import _agent_score_key
 
 logger = logging.getLogger(__name__)
 
@@ -229,8 +230,6 @@ def _apply_score_updates(
         working_scores: Current scores dict {topic_id: {agent_key: score}}
         score_updates: Updates from LLM {topic_id: {agent_name: delta}}
     """
-    from .report_builder import _agent_score_key
-
     for tid, per_agent in score_updates.items():
         if tid not in working_scores:
             continue
@@ -258,8 +257,6 @@ def _filter_scores_by_agents(
     Returns:
         Filtered scores dict {topic_id: {agent_key: score}}
     """
-    from .report_builder import _agent_score_key
-
     result: dict[str, dict[str, float]] = {}
     for tid in topic_ids:
         per_topic: dict[str, float] = {}
@@ -292,8 +289,6 @@ def _run_deliberation_loop(
         (final_scores, rounds_executed, converged, discussion)
     """
     from .deliberation import llm_deliberation_round
-    from .report_builder import _agent_score_key
-
     topic_catalog = _build_mock_topic_catalog(topic_ids)
     filtered_defs = {k: v for k, v in agent_definitions.items() if k in agent_ids}
 
@@ -648,8 +643,6 @@ def level2_check_node(state: dict) -> dict:
 def level3_node(state: dict) -> dict:
     """C-Level + silo representatives full deliberation."""
     from .deliberation import llm_deliberation_round
-    from .report_builder import _agent_score_key
-
     org_config = state["org_config"]
     groups = _group_agents_by_chapter(org_config)
     silo_groups = _group_chapters_by_silo(org_config)
