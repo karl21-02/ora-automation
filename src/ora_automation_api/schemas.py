@@ -537,3 +537,105 @@ class OrgChapterRead(BaseModel):
     sort_order: int
     created_at: datetime
     updated_at: datetime
+
+
+# ── GitHub Integration ─────────────────────────────────────────────
+
+
+class GithubInstallationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    installation_id: int
+    account_type: str
+    account_login: str
+    account_id: int
+    avatar_url: str | None = None
+    status: str
+    installed_at: datetime
+    synced_at: datetime | None = None
+    repos_count: int = Field(default=0, description="Number of synced repos")
+
+
+class GithubRepoRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    installation_id: str
+    repo_id: int
+    name: str
+    full_name: str
+    description: str | None = None
+    html_url: str
+    clone_url: str
+    default_branch: str
+    language: str | None = None
+    stars: int
+    is_private: bool
+    synced_at: datetime
+
+
+class GithubRepoUpdate(BaseModel):
+    enabled_for_analysis: bool | None = None
+
+
+# ── Projects (Unified) ─────────────────────────────────────────────
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str | None = None
+    source_type: str = Field(default="local", pattern="^(local|github|github_only)$")
+    local_path: str | None = Field(default=None, max_length=500)
+    github_repo_id: str | None = Field(default=None, max_length=36)
+    enabled: bool = True
+    language: str | None = Field(default=None, max_length=50)
+    default_branch: str = Field(default="main", max_length=100)
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    source_type: str | None = Field(default=None, pattern="^(local|github|github_only)$")
+    local_path: str | None = None
+    github_repo_id: str | None = None
+    enabled: bool | None = None
+    language: str | None = None
+    default_branch: str | None = None
+
+
+class ProjectRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    description: str | None = None
+    source_type: str
+    local_path: str | None = None
+    github_repo_id: str | None = None
+    enabled: bool
+    last_analyzed_at: datetime | None = None
+    analysis_count: int
+    language: str | None = None
+    default_branch: str
+    created_at: datetime
+    updated_at: datetime
+    # Joined fields
+    github_repo: GithubRepoRead | None = None
+
+
+class ProjectList(BaseModel):
+    items: list[ProjectRead]
+    total: int
+
+
+class LocalScanResult(BaseModel):
+    created: int
+    updated: int
+    unchanged: int
+
+
+class ProjectPrepareResponse(BaseModel):
+    project_id: str
+    local_path: str
+    cloned: bool = False

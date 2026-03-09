@@ -17,6 +17,9 @@ dependencies = [
     "requests>=2.32.0",
     "apscheduler>=3.10.0,<4.0.0",
     "langgraph>=1.0.0,<2.0.0",
+    "PyJWT>=2.8.0,<3.0.0",
+    "cryptography>=41.0.0",
+    "httpx>=0.24.0",
 ]
 
 [project.scripts]
@@ -27,7 +30,7 @@ ora-automation-chatbot = "ora_rd_orchestrator.chatbot:main"
 
 [project.optional-dependencies]
 web = ["scrapling>=0.4.0"]
-dev = ["pytest>=7.4.0", "pytest-cov>=4.1.0", "httpx>=0.24.0"]
+dev = ["pytest>=7.4.0", "pytest-cov>=4.1.0", "httpx>=0.24.0", "pytest-asyncio>=0.23.0"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

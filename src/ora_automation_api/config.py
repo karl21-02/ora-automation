@@ -141,6 +141,19 @@ class Settings:
             os.getenv("ORA_SCHEDULER_POLL_SECONDS", "60").strip()
         )
 
+        # GitHub App integration
+        self.github_app_id = os.getenv("GITHUB_APP_ID", "").strip()
+        self.github_app_private_key = os.getenv("GITHUB_APP_PRIVATE_KEY", "").strip()
+        self.github_webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET", "").strip()
+        self.github_app_name = os.getenv("GITHUB_APP_NAME", "ora-automation").strip()
+        self.github_api_base_url = os.getenv(
+            "GITHUB_API_BASE_URL", "https://api.github.com"
+        ).strip()
+        # Directory for on-demand shallow clones
+        self.github_clone_base_dir = Path(
+            os.getenv("GITHUB_CLONE_BASE_DIR", "/tmp/ora-clones")
+        ).resolve()
+
         self._validate()
 
     def _validate(self) -> None:
@@ -190,6 +203,11 @@ class Settings:
                 self.default_target,
             )
             self.allowed_targets = (*self.allowed_targets, self.default_target)
+
+    @property
+    def github_app_configured(self) -> bool:
+        """Check if GitHub App integration is properly configured."""
+        return bool(self.github_app_id and self.github_app_private_key)
 
 
 settings = Settings()

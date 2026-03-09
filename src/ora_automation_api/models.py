@@ -310,3 +310,107 @@ class ScheduledJob(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
+
+# =============================================================================
+# GitHub App Integration Models
+# =============================================================================
+
+
+class GithubInstallation(Base):
+    """GitHub App이 설치된 Organization 또는 User 정보."""
+
+    __tablename__ = "github_installations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    installation_id: Mapped[int] = mapped_column(Integer, unique=True, index=True, nullable=False)
+    account_type: Mapped[str] = mapped_column(String(20), nullable=False)  # "Organization" or "User"
+    account_login: Mapped[str] = mapped_column(String(255), nullable=False)  # org name or username
+    account_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Status: active, suspended, deleted
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+
+    installed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class GithubRepo(Base):
+    """동기화된 GitHub Repository."""
+
+    __tablename__ = "github_repos"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    installation_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("github_installations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # GitHub repo info
+    repo_id: Mapped[int] = mapped_column(Integer, unique=True, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(500), nullable=False, index=True)  # owner/repo
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    html_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    clone_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    default_branch: Mapped[str] = mapped_column(String(100), nullable=False, default="main")
+
+    # Metadata
+    language: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    stars: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_private: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Project(Base):
+    """통합 프로젝트 테이블 - 모든 분석 대상의 단일 소스.
+
+    source_type:
+      - "local": 로컬 워크스페이스에만 존재
+      - "github": GitHub + 로컬이 연결됨
+      - "github_only": GitHub만 (clone 필요)
+    """
+
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Source type: "local", "github", "github_only"
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False, default="local")
+
+    # Local path (if available)
+    local_path: Mapped[str | None] = mapped_column(String(500), nullable=True, unique=True)
+
+    # GitHub connection (if synced)
+    github_repo_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("github_repos.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # Analysis settings
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    analysis_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Metadata (cached from GitHub or local scan)
+    language: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    default_branch: Mapped[str] = mapped_column(String(100), nullable=False, default="main")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
