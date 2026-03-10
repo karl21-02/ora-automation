@@ -946,3 +946,343 @@ body {
   border-color: var(--color-accent);
   color: var(--color-accent-text);
 }
+
+/* ── Skeleton Loading ────────────────────────────────────────── */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-tertiary) 25%,
+    var(--color-bg-hover) 50%,
+    var(--color-bg-tertiary) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-card {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  background-color: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.skeleton-card-image {
+  margin-bottom: 12px;
+}
+
+.skeleton-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.skeleton-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.skeleton-card-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.skeleton-list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+}
+
+.skeleton-list-item-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ── Empty State ─────────────────────────────────────────────── */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.empty-state-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 16px;
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+}
+
+.empty-state-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.empty-state-description {
+  margin: 0 0 20px;
+  font-size: 14px;
+  color: var(--color-text-muted);
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+.empty-state-action {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+  background-color: var(--color-accent);
+  border: none;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.empty-state-action:hover {
+  background-color: var(--color-accent-hover);
+}
+
+.empty-state-content {
+  margin-top: 16px;
+}
+
+/* Inline empty state (for lists) */
+.empty-state-inline {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  background-color: var(--color-bg-secondary);
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--color-border);
+}
+
+.empty-state-inline p {
+  margin: 0;
+}
+
+.empty-state-inline p + p {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-placeholder);
+}
+
+/* ── Common Button Styles ────────────────────────────────────── */
+
+.btn-action {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  background-color: var(--color-bg);
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.btn-action:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.btn-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-action.primary {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
+.btn-action.primary:hover {
+  background-color: var(--color-accent-hover);
+}
+
+.btn-action.danger {
+  background-color: var(--color-bg);
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.btn-action.danger:hover {
+  background-color: var(--color-error-bg);
+}
+
+/* Status Badge */
+.status-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.status-badge.warning {
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.status-badge.error {
+  background-color: var(--color-error-bg);
+  color: var(--color-error-text);
+}
+
+/* ── GitHub Settings ─────────────────────────────────────────── */
+
+.github-settings {
+  margin-bottom: 24px;
+}
+
+.github-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.github-install-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  background-color: #24292f;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+[data-theme="dark"] .github-install-btn {
+  background-color: #f0f6fc;
+  color: #24292f;
+}
+
+.github-install-btn:hover {
+  background-color: #32383f;
+}
+
+[data-theme="dark"] .github-install-btn:hover {
+  background-color: #d8dee4;
+}
+
+.github-install-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.github-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.github-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background-color: var(--color-bg-secondary);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+}
+
+.github-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: var(--color-bg-tertiary);
+}
+
+.github-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.github-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.github-meta {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 2px 0 0;
+}
+
+.github-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Sidebar Empty State ─────────────────────────────────────── */
+
+.sidebar-empty-state {
+  padding: 16px 12px;
+  color: var(--color-text-placeholder);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ── Report Item ─────────────────────────────────────────────── */
+
+.report-item-title {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+.report-item-meta {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
