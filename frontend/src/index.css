@@ -1,54 +1,217 @@
-/* ── CSS Variables ─────────────────────────────────────────────── */
+/* ── CSS Variables (Light Theme - Default) ────────────────────── */
 :root {
+  /* Layout */
   --sidebar-width-expanded: 260px;
   --sidebar-width-collapsed: 64px;
   --sidebar-transition: 0.2s ease;
-  --sidebar-bg: #f9fafb;
-  --sidebar-border: #e5e7eb;
-  --sidebar-text: #374151;
-  --sidebar-text-muted: #9ca3af;
-  --sidebar-hover-bg: #f3f4f6;
-  --sidebar-active-bg: #e5e7eb;
-  --sidebar-accent: #2563eb;
+
+  /* Colors - Semantic */
+  --color-bg: #ffffff;
+  --color-bg-secondary: #f9fafb;
+  --color-bg-tertiary: #f3f4f6;
+  --color-bg-hover: #f3f4f6;
+  --color-bg-active: #e5e7eb;
+  --color-bg-elevated: #ffffff;
+
+  --color-text: #1f2937;
+  --color-text-secondary: #374151;
+  --color-text-muted: #6b7280;
+  --color-text-placeholder: #9ca3af;
+
+  --color-border: #e5e7eb;
+  --color-border-light: #f3f4f6;
+
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-light: #dbeafe;
+  --color-accent-text: #1e40af;
+
+  /* Semantic Colors */
+  --color-success: #10b981;
+  --color-success-bg: #d1fae5;
+  --color-success-text: #065f46;
+
+  --color-warning: #f59e0b;
+  --color-warning-bg: #fef3c7;
+  --color-warning-text: #92400e;
+
+  --color-error: #ef4444;
+  --color-error-bg: #fee2e2;
+  --color-error-text: #991b1b;
+
+  --color-info: #3b82f6;
+  --color-info-bg: #dbeafe;
+  --color-info-text: #1e40af;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+
+  /* Code blocks */
+  --color-code-bg: rgba(0, 0, 0, 0.06);
+  --color-pre-bg: #f3f4f6;
+
+  /* Sidebar (mapped to semantic) */
+  --sidebar-bg: var(--color-bg-secondary);
+  --sidebar-border: var(--color-border);
+  --sidebar-text: var(--color-text-secondary);
+  --sidebar-text-muted: var(--color-text-muted);
+  --sidebar-hover-bg: var(--color-bg-hover);
+  --sidebar-active-bg: var(--color-bg-active);
+  --sidebar-accent: var(--color-accent);
+
+  /* Input */
+  --input-bg: var(--color-bg);
+  --input-border: var(--color-border);
+  --input-focus-border: #a5b4fc;
+
+  /* Scrollbar */
+  --scrollbar-thumb: #d1d5db;
+  --scrollbar-track: transparent;
+
+  /* Transition */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+
+  /* Border radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
 }
 
+/* ── Dark Theme ───────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --color-bg: #0f172a;
+  --color-bg-secondary: #1e293b;
+  --color-bg-tertiary: #334155;
+  --color-bg-hover: #334155;
+  --color-bg-active: #475569;
+  --color-bg-elevated: #1e293b;
+
+  --color-text: #f1f5f9;
+  --color-text-secondary: #e2e8f0;
+  --color-text-muted: #94a3b8;
+  --color-text-placeholder: #64748b;
+
+  --color-border: #334155;
+  --color-border-light: #1e293b;
+
+  --color-accent: #3b82f6;
+  --color-accent-hover: #60a5fa;
+  --color-accent-light: #1e3a5f;
+  --color-accent-text: #93c5fd;
+
+  --color-success-bg: #064e3b;
+  --color-success-text: #6ee7b7;
+
+  --color-warning-bg: #78350f;
+  --color-warning-text: #fcd34d;
+
+  --color-error-bg: #7f1d1d;
+  --color-error-text: #fca5a5;
+
+  --color-info-bg: #1e3a5f;
+  --color-info-text: #93c5fd;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+
+  --color-code-bg: rgba(255, 255, 255, 0.1);
+  --color-pre-bg: #1e293b;
+
+  --input-bg: #1e293b;
+  --input-border: #475569;
+  --input-focus-border: #60a5fa;
+
+  --scrollbar-thumb: #475569;
+  --scrollbar-track: #1e293b;
+}
+
+/* ── Base Styles ──────────────────────────────────────────────── */
 * {
   box-sizing: border-box;
+}
+
+html {
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background-color: #fff;
-  color: #1f2937;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  transition: background-color var(--transition-normal), color var(--transition-normal);
 }
 
 #root {
   height: 100vh;
 }
 
-/* Markdown body styles */
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Focus visible for accessibility */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── Markdown body styles ─────────────────────────────────────── */
+.markdown-body {
+  color: var(--color-text);
+}
+
 .markdown-body p {
   margin: 0.4em 0;
 }
 
 .markdown-body h1, .markdown-body h2, .markdown-body h3 {
   margin: 0.6em 0 0.3em;
+  color: var(--color-text);
 }
 
 .markdown-body code {
-  background-color: rgba(0, 0, 0, 0.06);
+  background-color: var(--color-code-bg);
   padding: 2px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 0.9em;
 }
 
 .markdown-body pre {
-  background-color: #f3f4f6;
+  background-color: var(--color-pre-bg);
   padding: 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   overflow-x: auto;
   font-size: 13px;
+  border: 1px solid var(--color-border);
 }
 
 .markdown-body pre code {
@@ -62,10 +225,10 @@ body {
 }
 
 .markdown-body blockquote {
-  border-left: 3px solid #d1d5db;
+  border-left: 3px solid var(--color-border);
   margin: 0.4em 0;
   padding-left: 12px;
-  color: #6b7280;
+  color: var(--color-text-muted);
 }
 
 .markdown-body table {
@@ -75,42 +238,50 @@ body {
 }
 
 .markdown-body th, .markdown-body td {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   padding: 6px 10px;
   text-align: left;
   font-size: 13px;
 }
 
 .markdown-body th {
-  background-color: #f9fafb;
+  background-color: var(--color-bg-secondary);
   font-weight: 600;
 }
 
-/* ── Sidebar ────────────────────────────────────────────────────── */
+.markdown-body a {
+  color: var(--color-accent);
+}
+
+.markdown-body a:hover {
+  color: var(--color-accent-hover);
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────── */
 
 .sidebar-conv-item {
   padding: 8px 12px;
   margin: 0 8px 2px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
   font-size: 13px;
-  color: #374151;
+  color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--transition-fast);
   position: relative;
 }
 
 .sidebar-conv-item:hover {
-  background-color: #f3f4f6;
+  background-color: var(--color-bg-hover);
 }
 
 .sidebar-conv-item.active {
-  background-color: #e5e7eb;
+  background-color: var(--color-bg-active);
 }
 
 .sidebar-conv-item .conv-actions {
@@ -129,22 +300,22 @@ body {
   border: none;
   cursor: pointer;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 13px;
-  color: #6b7280;
+  color: var(--color-text-muted);
   line-height: 1;
 }
 
 .conv-actions button:hover {
-  background-color: #e5e7eb;
-  color: #1f2937;
+  background-color: var(--color-bg-active);
+  color: var(--color-text);
 }
 
 .sidebar-section-label {
   padding: 12px 12px 4px 20px;
   font-size: 11px;
   font-weight: 600;
-  color: #9ca3af;
+  color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -152,61 +323,61 @@ body {
 .sidebar-search-input {
   width: 100%;
   padding: 7px 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-lg);
   font-size: 13px;
   outline: none;
-  background: #fff;
-  color: #1f2937;
-  transition: border-color 0.15s;
+  background: var(--input-bg);
+  color: var(--color-text);
+  transition: border-color var(--transition-fast);
 }
 
 .sidebar-search-input:focus {
-  border-color: #a5b4fc;
+  border-color: var(--input-focus-border);
 }
 
 .sidebar-search-input::placeholder {
-  color: #9ca3af;
+  color: var(--color-text-placeholder);
 }
 
 .sidebar-delete-confirm {
   padding: 6px 12px 8px;
   margin: 0 8px 2px;
-  background-color: #fef2f2;
-  border-radius: 8px;
+  background-color: var(--color-error-bg);
+  border-radius: var(--radius-lg);
   font-size: 12px;
-  color: #991b1b;
+  color: var(--color-error-text);
 }
 
 .sidebar-delete-confirm button {
   border: none;
   cursor: pointer;
   padding: 3px 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 500;
   margin-right: 6px;
 }
 
 .sidebar-delete-confirm .btn-delete {
-  background-color: #dc2626;
+  background-color: var(--color-error);
   color: #fff;
 }
 
 .sidebar-delete-confirm .btn-delete:hover {
-  background-color: #b91c1c;
+  filter: brightness(0.9);
 }
 
 .sidebar-delete-confirm .btn-cancel {
-  background-color: #e5e7eb;
-  color: #374151;
+  background-color: var(--color-bg-active);
+  color: var(--color-text-secondary);
 }
 
 .sidebar-delete-confirm .btn-cancel:hover {
-  background-color: #d1d5db;
+  background-color: var(--color-border);
 }
 
-/* ── Collapsible Sidebar ───────────────────────────────────────── */
+/* ── Collapsible Sidebar ──────────────────────────────────────── */
 
 .sidebar {
   position: relative;
@@ -217,7 +388,7 @@ body {
   display: flex;
   flex-direction: column;
   background-color: var(--sidebar-bg);
-  transition: width var(--sidebar-transition), min-width var(--sidebar-transition);
+  transition: width var(--sidebar-transition), min-width var(--sidebar-transition), background-color var(--transition-normal);
 }
 
 .sidebar.collapsed {
@@ -238,7 +409,7 @@ body {
   gap: 12px;
   padding: 10px 12px;
   margin: 2px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
@@ -247,7 +418,7 @@ body {
   border: none;
   text-align: left;
   width: calc(100% - 16px);
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .sidebar-nav-item:hover {
@@ -324,15 +495,15 @@ body {
 .sidebar-icon-btn {
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--sidebar-border);
-  background-color: #fff;
+  background-color: var(--color-bg-elevated);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--sidebar-text);
-  transition: background-color 0.15s ease;
+  transition: background-color var(--transition-fast);
 }
 
 .sidebar-icon-btn:hover {
@@ -356,14 +527,15 @@ body {
 
 /* Sidebar tooltip */
 .sidebar-tooltip {
-  background-color: #1f2937;
-  color: #fff;
+  background-color: var(--color-bg-elevated);
+  color: var(--color-text);
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--color-border);
   pointer-events: none;
   animation: tooltipFadeIn 0.15s ease;
 }
@@ -391,11 +563,11 @@ body {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  background-color: #ef4444;
+  background-color: var(--color-error);
   color: #fff;
   font-size: 10px;
   font-weight: 600;
-  border-radius: 8px;
+  border-radius: var(--radius-full);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -411,14 +583,14 @@ body {
   }
 }
 
-/* ── Animations ───────────────────────────────────────────────────── */
+/* ── Animations ───────────────────────────────────────────────── */
 
 /* Toggle icon rotation */
 .sidebar-toggle-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.2s ease;
+  transition: transform var(--transition-normal);
 }
 
 .sidebar.collapsed .sidebar-toggle-icon {
@@ -452,7 +624,7 @@ body {
   height: 20px;
   background-color: var(--sidebar-accent);
   border-radius: 0 2px 2px 0;
-  transition: transform 0.15s ease;
+  transition: transform var(--transition-fast);
 }
 
 .sidebar-nav-item {
@@ -465,7 +637,7 @@ body {
 
 /* Icon hover scale */
 .sidebar-nav-item .nav-icon {
-  transition: transform 0.15s ease;
+  transition: transform var(--transition-fast);
 }
 
 .sidebar-nav-item:hover .nav-icon {
@@ -478,7 +650,7 @@ body {
 
 /* Plus button animation */
 .sidebar-icon-btn svg {
-  transition: transform 0.15s ease;
+  transition: transform var(--transition-fast);
 }
 
 .sidebar-icon-btn:hover svg {
@@ -489,7 +661,7 @@ body {
   transform: scale(0.9);
 }
 
-/* ── Sidebar Resize Handle ────────────────────────────────────────── */
+/* ── Sidebar Resize Handle ────────────────────────────────────── */
 
 .sidebar-resize-handle {
   position: absolute;
@@ -499,7 +671,7 @@ body {
   width: 4px;
   cursor: col-resize;
   background: transparent;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--transition-fast);
   z-index: 10;
 }
 
@@ -517,9 +689,38 @@ body {
   width: 8px;
 }
 
-/* ── Responsive / Mobile ──────────────────────────────────────────── */
+/* ── Theme Toggle Button ──────────────────────────────────────── */
 
-/* Mobile hamburger button (shown in main content area on mobile) */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--sidebar-border);
+  background-color: var(--color-bg-elevated);
+  cursor: pointer;
+  color: var(--sidebar-text);
+  transition: all var(--transition-fast);
+}
+
+.theme-toggle:hover {
+  background-color: var(--sidebar-hover-bg);
+  color: var(--color-text);
+}
+
+.theme-toggle svg {
+  transition: transform var(--transition-normal);
+}
+
+.theme-toggle:hover svg {
+  transform: rotate(15deg) scale(1.1);
+}
+
+/* ── Responsive / Mobile ──────────────────────────────────────── */
+
+/* Mobile hamburger button */
 .mobile-menu-btn {
   display: none;
   position: fixed;
@@ -528,18 +729,18 @@ body {
   z-index: 100;
   width: 40px;
   height: 40px;
-  border-radius: 8px;
-  border: 1px solid var(--sidebar-border);
-  background-color: #fff;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-bg-elevated);
   cursor: pointer;
   align-items: center;
   justify-content: center;
-  color: var(--sidebar-text);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  color: var(--color-text-secondary);
+  box-shadow: var(--shadow-md);
 }
 
 .mobile-menu-btn:hover {
-  background-color: var(--sidebar-hover-bg);
+  background-color: var(--color-bg-hover);
 }
 
 /* Sidebar overlay backdrop */
@@ -550,6 +751,10 @@ body {
   background-color: rgba(0, 0, 0, 0.5);
   z-index: 199;
   animation: backdropFadeIn 0.2s ease;
+}
+
+[data-theme="dark"] .sidebar-backdrop {
+  background-color: rgba(0, 0, 0, 0.7);
 }
 
 @keyframes backdropFadeIn {
@@ -573,7 +778,7 @@ body {
     transition: transform 0.25s ease;
     width: var(--sidebar-width-expanded) !important;
     min-width: var(--sidebar-width-expanded) !important;
-    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.15);
+    box-shadow: var(--shadow-xl);
   }
 
   .sidebar.mobile-open {
@@ -606,4 +811,138 @@ body {
   .main-content {
     padding-top: 60px;
   }
+}
+
+/* ── Utility Classes ──────────────────────────────────────────── */
+
+.fade-in {
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.slide-up {
+  animation: slideUp 0.2s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.slide-down {
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Settings Panel ──────────────────────────────────────────── */
+
+.settings-panel {
+  flex: 1;
+  padding: 24px;
+  background-color: var(--color-bg);
+  overflow-y: auto;
+}
+
+.settings-title {
+  margin: 0 0 24px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.settings-divider {
+  height: 1px;
+  background-color: var(--color-border);
+  margin: 24px 0;
+}
+
+.settings-section {
+  margin-bottom: 24px;
+}
+
+.settings-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin: 0 0 12px;
+}
+
+.settings-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.settings-checkbox.disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.settings-checkbox input {
+  accent-color: var(--color-accent);
+}
+
+.settings-about-version {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.settings-about-description {
+  font-size: 12px;
+  color: var(--color-text-placeholder);
+  margin: 4px 0 0;
+}
+
+/* Theme Selector */
+.theme-selector {
+  display: flex;
+  gap: 8px;
+}
+
+.theme-option {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-bg);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.theme-option:hover {
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-text-muted);
+}
+
+.theme-option.active {
+  background-color: var(--color-accent-light);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
 }
