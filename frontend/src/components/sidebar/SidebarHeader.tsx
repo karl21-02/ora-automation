@@ -1,5 +1,6 @@
 import { ChevronLeft, Plus } from 'lucide-react'
 import { APP_NAME } from '../../lib/constants'
+import ThemeToggle from '../ThemeToggle'
 
 interface SidebarHeaderProps {
   isCollapsed: boolean
@@ -13,9 +14,12 @@ export function SidebarHeader({ isCollapsed, onToggle, onNewChat }: SidebarHeade
       <span className="sidebar-header-title">{APP_NAME}</span>
       <div className="sidebar-header-actions">
         {!isCollapsed && (
-          <button onClick={onNewChat} title="New Chat (⌘N)" className="sidebar-icon-btn">
-            <Plus size={18} />
-          </button>
+          <>
+            <ThemeToggle />
+            <button onClick={onNewChat} title="New Chat (⌘N)" className="sidebar-icon-btn">
+              <Plus size={18} />
+            </button>
+          </>
         )}
         <button
           onClick={onToggle}
