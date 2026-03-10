@@ -1,6 +1,7 @@
 import { Menu } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ChatWindow from './components/ChatWindow'
+import NewChatModal from './components/NewChatModal'
 import OrgPanel from './components/OrgPanel'
 import ReportViewer from './components/ReportViewer'
 import SchedulerPanel from './components/SchedulerPanel'
@@ -17,7 +18,7 @@ import type { Conversation, Message, Organization } from './types'
 
 const ACTIVE_KEY = 'ora-chatbot-active-id'
 
-function newConversation(orgId?: string | null): Conversation {
+function newConversation(orgId?: string | null, selectedProjects?: string[]): Conversation {
   return {
     id: crypto.randomUUID(),
     title: '',
@@ -25,6 +26,7 @@ function newConversation(orgId?: string | null): Conversation {
     createdAt: new Date(),
     orgId: orgId ?? null,
     orgName: null,
+    selectedProjects: selectedProjects ?? [],
   }
 }
 
@@ -40,6 +42,7 @@ export default function App() {
   const runningCount = useRunningCount()
   const isMobile = useIsMobile()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [newChatModalOpen, setNewChatModalOpen] = useState(false)
   const { width: sidebarWidth, handleMouseDown: handleResizeStart } = useSidebarResize()
 
   // Close mobile sidebar when switching away from mobile view
@@ -188,8 +191,8 @@ export default function App() {
     )
   }, [activeId])
 
-  const handleNewConversation = useCallback(async (orgId?: string | null) => {
-    const conv = newConversation(orgId)
+  const handleNewConversation = useCallback(async (orgId?: string | null, selectedProjects?: string[]) => {
+    const conv = newConversation(orgId, selectedProjects)
     try {
       await createConversation(conv.id, conv.title, orgId)
     } catch {
@@ -197,6 +200,15 @@ export default function App() {
     }
     setConversations((prev) => [conv, ...prev])
     setActiveId(conv.id)
+  }, [])
+
+  const handleNewChatFromModal = useCallback((orgId: string | null, selectedProjects: string[]) => {
+    handleNewConversation(orgId, selectedProjects)
+    setActiveMenu('chats')
+  }, [handleNewConversation])
+
+  const handleOpenNewChatModal = useCallback(() => {
+    setNewChatModalOpen(true)
   }, [])
 
   const handleDeleteConversation = useCallback(async (id: string) => {
@@ -289,7 +301,7 @@ export default function App() {
         conversations={conversations}
         activeConversationId={activeId}
         onSelectConversation={(id) => { setActiveMenu('chats'); setActiveId(id); handleMobileClose() }}
-        onNewConversation={(orgId) => { setActiveMenu('chats'); handleNewConversation(orgId); handleMobileClose() }}
+        onNewConversation={() => { handleOpenNewChatModal(); handleMobileClose() }}
         onSelectReport={(f) => { setReportFile(f); handleMobileClose() }}
         onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}
@@ -317,6 +329,7 @@ export default function App() {
           orgs={orgs}
           onChangeOrg={(orgId) => handleChangeConversationOrg(activeConv.id, orgId)}
           onNavigateToOrgs={() => setActiveMenu('orgs')}
+          selectedProjects={activeConv.selectedProjects ?? []}
         />
       )}
       {activeMenu === 'reports' && (
@@ -339,6 +352,15 @@ export default function App() {
           onClose={() => setReportFile(null)}
         />
       )}
+
+      {/* New Chat Modal */}
+      <NewChatModal
+        open={newChatModalOpen}
+        onClose={() => setNewChatModalOpen(false)}
+        onConfirm={handleNewChatFromModal}
+        orgs={orgs}
+        currentOrgId={activeConv?.orgId}
+      />
     </div>
   )
 }

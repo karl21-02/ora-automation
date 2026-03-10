@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createBatchRuns, createRun, getRun, getRunEvents, sendChatStream, type ChatHistoryMessage } from '../lib/api'
 import { APP_NAME } from '../lib/constants'
 import type { ChatPlan, DialogState, Message, OrchestrationEvent, OrchestrationRun, Organization } from '../types'
+import ChatContextBar from './ChatContextBar'
 import GuestAgentPicker from './GuestAgentPicker'
 import MessageBubble from './MessageBubble'
 import OrgSwitcher from './OrgSwitcher'
@@ -16,6 +17,7 @@ interface Props {
   orgs: Organization[]
   onChangeOrg: (orgId: string | null) => void
   onNavigateToOrgs?: () => void
+  selectedProjects?: string[]
 }
 
 const STAGE_COLORS: Record<string, string> = {
@@ -25,7 +27,7 @@ const STAGE_COLORS: Record<string, string> = {
   validation: '#f59e0b',
 }
 
-export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, conversationId, orgId, orgName: _orgName, orgs, onChangeOrg, onNavigateToOrgs }: Props) {
+export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, conversationId, orgId, orgName: _orgName, orgs, onChangeOrg, onNavigateToOrgs, selectedProjects = [] }: Props) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [streaming, setStreaming] = useState(false)
@@ -328,6 +330,12 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
           onCreateNew={onNavigateToOrgs}
         />
       </div>
+
+      {/* Context bar (selected projects) */}
+      <ChatContextBar
+        orgName={orgs.find(o => o.id === orgId)?.name ?? null}
+        selectedProjects={selectedProjects}
+      />
 
       {/* Messages */}
       <div style={{

@@ -10,7 +10,7 @@ interface Props {
   conversations: Conversation[]
   activeConversationId: string | null
   onSelectConversation: (id: string) => void
-  onNewConversation: (orgId?: string | null) => void
+  onNewConversation: () => void
   onSelectReport: (filename: string) => void
   onDeleteConversation: (id: string) => void
   onRenameConversation: (id: string, title: string) => void
