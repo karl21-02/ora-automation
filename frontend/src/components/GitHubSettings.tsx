@@ -6,115 +6,7 @@ import {
   listGithubInstallations,
   syncGithubInstallation,
 } from '../lib/api'
-
-const styles = {
-  container: {
-    marginBottom: 24,
-  } as React.CSSProperties,
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  } as React.CSSProperties,
-  title: {
-    fontSize: 14,
-    fontWeight: 600,
-    color: '#374151',
-    margin: 0,
-  } as React.CSSProperties,
-  installButton: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '6px 12px',
-    fontSize: 13,
-    fontWeight: 500,
-    color: '#fff',
-    backgroundColor: '#24292f',
-    border: 'none',
-    borderRadius: 6,
-    cursor: 'pointer',
-  } as React.CSSProperties,
-  emptyState: {
-    padding: '24px 16px',
-    textAlign: 'center' as const,
-    color: '#6b7280',
-    fontSize: 13,
-    backgroundColor: '#f9fafb',
-    borderRadius: 8,
-    border: '1px dashed #e5e7eb',
-  } as React.CSSProperties,
-  list: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: 8,
-  } as React.CSSProperties,
-  item: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    padding: '12px 16px',
-    backgroundColor: '#f9fafb',
-    borderRadius: 8,
-    border: '1px solid #e5e7eb',
-  } as React.CSSProperties,
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: '50%',
-    backgroundColor: '#e5e7eb',
-  } as React.CSSProperties,
-  info: {
-    flex: 1,
-    minWidth: 0,
-  } as React.CSSProperties,
-  name: {
-    fontSize: 14,
-    fontWeight: 500,
-    color: '#1f2937',
-    margin: 0,
-  } as React.CSSProperties,
-  meta: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginTop: 2,
-  } as React.CSSProperties,
-  actions: {
-    display: 'flex',
-    gap: 8,
-  } as React.CSSProperties,
-  actionButton: {
-    padding: '4px 10px',
-    fontSize: 12,
-    fontWeight: 500,
-    border: '1px solid #e5e7eb',
-    borderRadius: 4,
-    cursor: 'pointer',
-    backgroundColor: '#fff',
-    color: '#374151',
-  } as React.CSSProperties,
-  syncButton: {
-    backgroundColor: '#3b82f6',
-    borderColor: '#3b82f6',
-    color: '#fff',
-  } as React.CSSProperties,
-  deleteButton: {
-    backgroundColor: '#fff',
-    borderColor: '#fca5a5',
-    color: '#dc2626',
-  } as React.CSSProperties,
-  statusBadge: {
-    display: 'inline-block',
-    padding: '2px 6px',
-    fontSize: 10,
-    fontWeight: 500,
-    borderRadius: 4,
-    backgroundColor: '#dcfce7',
-    color: '#166534',
-    marginLeft: 8,
-  } as React.CSSProperties,
-}
+import { SkeletonList } from './Skeleton'
 
 export default function GitHubSettings() {
   const [installations, setInstallations] = useState<GithubInstallation[]>([])
@@ -171,11 +63,11 @@ export default function GitHubSettings() {
   }
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <h3 style={styles.title}>GitHub Integration</h3>
+    <div className="github-settings">
+      <div className="github-settings-header">
+        <h3 className="settings-section-title">GitHub Integration</h3>
         <button
-          style={styles.installButton}
+          className="github-install-btn"
           onClick={handleInstall}
           disabled={!installUrl}
         >
@@ -187,51 +79,45 @@ export default function GitHubSettings() {
       </div>
 
       {loading ? (
-        <div style={styles.emptyState}>Loading...</div>
+        <SkeletonList count={2} itemHeight={56} />
       ) : installations.length === 0 ? (
-        <div style={styles.emptyState}>
-          <p style={{ margin: 0, marginBottom: 8 }}>No GitHub organizations connected</p>
-          <p style={{ margin: 0, fontSize: 12 }}>Click "Install GitHub App" to connect your repositories</p>
+        <div className="empty-state-inline">
+          <p>No GitHub organizations connected</p>
+          <p>Click "Install GitHub App" to connect your repositories</p>
         </div>
       ) : (
-        <div style={styles.list}>
+        <div className="github-list">
           {installations.map(inst => (
-            <div key={inst.id} style={styles.item}>
+            <div key={inst.id} className="github-item">
               {inst.avatar_url ? (
-                <img src={inst.avatar_url} alt="" style={styles.avatar} />
+                <img src={inst.avatar_url} alt="" className="github-avatar" />
               ) : (
-                <div style={styles.avatar} />
+                <div className="github-avatar" />
               )}
-              <div style={styles.info}>
-                <p style={styles.name}>
+              <div className="github-info">
+                <p className="github-name">
                   {inst.account_login}
-                  <span style={{
-                    ...styles.statusBadge,
-                    ...(inst.status !== 'active' && {
-                      backgroundColor: '#fef3c7',
-                      color: '#92400e',
-                    }),
-                  }}>
+                  <span className={`status-badge ${inst.status !== 'active' ? 'warning' : ''}`}>
                     {inst.status}
                   </span>
                 </p>
-                <p style={styles.meta}>
+                <p className="github-meta">
                   {inst.account_type} &middot; {inst.repos_count ?? 0} repos
                   {inst.synced_at && (
                     <> &middot; Last synced {new Date(inst.synced_at).toLocaleDateString()}</>
                   )}
                 </p>
               </div>
-              <div style={styles.actions}>
+              <div className="github-actions">
                 <button
-                  style={{ ...styles.actionButton, ...styles.syncButton }}
+                  className="btn-action primary"
                   onClick={() => handleSync(inst.id)}
                   disabled={syncing === inst.id}
                 >
                   {syncing === inst.id ? 'Syncing...' : 'Sync'}
                 </button>
                 <button
-                  style={{ ...styles.actionButton, ...styles.deleteButton }}
+                  className="btn-action danger"
                   onClick={() => handleDelete(inst.id)}
                 >
                   Disconnect
