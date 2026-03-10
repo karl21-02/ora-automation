@@ -8,6 +8,12 @@ interface Props {
   disabled?: boolean
 }
 
+const sourceTypeConfig: Record<string, { icon: string; label: string; color: string; bg: string }> = {
+  local: { icon: '📁', label: 'Local', color: '#166534', bg: '#dcfce7' },
+  github: { icon: '🐙', label: 'GitHub', color: '#1e40af', bg: '#dbeafe' },
+  github_only: { icon: '☁️', label: 'Clone', color: '#7c3aed', bg: '#ede9fe' },
+}
+
 export default function ProjectSelectCard({ projects, onConfirm, onDismiss, disabled = false }: Props) {
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(projects.map((p) => p.name))
@@ -72,62 +78,111 @@ export default function ProjectSelectCard({ projects, onConfirm, onDismiss, disa
       </div>
 
       {/* Project rows */}
-      {projects.map((project) => (
-        <label
-          key={project.name}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '8px 10px',
-            borderRadius: 6,
-            backgroundColor: selected.has(project.name) ? '#eff6ff' : '#f9fafb',
-            border: `1px solid ${selected.has(project.name) ? '#93c5fd' : '#e5e7eb'}`,
-            marginBottom: 4,
-            cursor: submitted ? 'not-allowed' : 'pointer',
-            transition: 'background-color 0.15s, border-color 0.15s',
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={selected.has(project.name)}
-            onChange={() => toggle(project.name)}
-            disabled={submitted}
-            style={{ marginTop: 1, accentColor: '#2563eb' }}
-          />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 600, color: '#1f2937' }}>
-              {project.name}
+      {projects.map((project) => {
+        const sourceType = sourceTypeConfig[project.source_type || 'local'] || sourceTypeConfig.local
+        return (
+          <label
+            key={project.name}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '8px 10px',
+              borderRadius: 6,
+              backgroundColor: selected.has(project.name) ? '#eff6ff' : '#f9fafb',
+              border: `1px solid ${selected.has(project.name) ? '#93c5fd' : '#e5e7eb'}`,
+              marginBottom: 4,
+              cursor: submitted ? 'not-allowed' : 'pointer',
+              transition: 'background-color 0.15s, border-color 0.15s',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={selected.has(project.name)}
+              onChange={() => toggle(project.name)}
+              disabled={submitted}
+              style={{ marginTop: 1, accentColor: '#2563eb' }}
+            />
+
+            {/* Source type icon */}
+            <span style={{ fontSize: 14, flexShrink: 0 }}>{sourceType.icon}</span>
+
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontWeight: 600,
+                color: '#1f2937'
+              }}>
+                {project.name}
+                {project.language && (
+                  <span style={{
+                    padding: '1px 5px',
+                    borderRadius: 3,
+                    fontSize: 10,
+                    fontWeight: 500,
+                    backgroundColor: '#f3f4f6',
+                    color: '#6b7280',
+                  }}>
+                    {project.language}
+                  </span>
+                )}
+              </div>
+              {project.description && (
+                <div style={{
+                  fontSize: 11,
+                  color: '#9ca3af',
+                  marginTop: 2,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}>
+                  {project.description}
+                </div>
+              )}
             </div>
-          </div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {project.has_makefile && (
+
+            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+              {/* Source type badge */}
               <span style={{
                 padding: '1px 6px',
                 borderRadius: 4,
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: 500,
-                backgroundColor: '#dbeafe',
-                color: '#1e40af',
+                backgroundColor: sourceType.bg,
+                color: sourceType.color,
               }}>
-                Makefile
+                {sourceType.label}
               </span>
-            )}
-            {project.has_dockerfile && (
-              <span style={{
-                padding: '1px 6px',
-                borderRadius: 4,
-                fontSize: 11,
-                fontWeight: 500,
-                backgroundColor: '#e0e7ff',
-                color: '#3730a3',
-              }}>
-                Docker
-              </span>
-            )}
-          </div>
-        </label>
-      ))}
+              {project.has_makefile && (
+                <span style={{
+                  padding: '1px 6px',
+                  borderRadius: 4,
+                  fontSize: 10,
+                  fontWeight: 500,
+                  backgroundColor: '#dbeafe',
+                  color: '#1e40af',
+                }}>
+                  Make
+                </span>
+              )}
+              {project.has_dockerfile && (
+                <span style={{
+                  padding: '1px 6px',
+                  borderRadius: 4,
+                  fontSize: 10,
+                  fontWeight: 500,
+                  backgroundColor: '#e0e7ff',
+                  color: '#3730a3',
+                }}>
+                  Docker
+                </span>
+              )}
+            </div>
+          </label>
+        )
+      })}
 
       {/* Action buttons */}
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
