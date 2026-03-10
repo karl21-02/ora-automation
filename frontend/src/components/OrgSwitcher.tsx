@@ -164,7 +164,7 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
           {filteredOrgs.length > 0 && <div style={dividerStyle} />}
 
           {/* Org list */}
-          {filteredOrgs.map((org, idx) => {
+          {filteredOrgs.map((org) => {
             const optionIdx = getOptionIndex(org.id)
             const isFocused = focusedIndex === optionIdx
             const isSelected = currentOrgId === org.id

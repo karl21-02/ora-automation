@@ -11,11 +11,14 @@ export interface ChatChoice {
 }
 
 export interface ProjectInfo {
+  id?: string
   name: string
   path: string
   has_makefile: boolean
   has_dockerfile: boolean
   description: string
+  source_type?: 'local' | 'github' | 'github_only'
+  language?: string | null
 }
 
 export interface OrgRecommendOption {

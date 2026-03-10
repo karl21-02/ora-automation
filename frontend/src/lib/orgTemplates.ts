@@ -42,15 +42,6 @@ export interface OrgTemplate {
   agents: OrgTemplateAgent[]
 }
 
-// Default agent weights
-const DEFAULT_WEIGHTS = {
-  impact: 0.25,
-  feasibility: 0.25,
-  novelty: 0.20,
-  research_signal: 0.20,
-  risk: -0.10,
-}
-
 // ============================================================================
 // TOSS TEMPLATE - Full 24 agents, 5 silos, 8 chapters
 // ============================================================================
