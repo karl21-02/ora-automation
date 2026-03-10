@@ -275,3 +275,150 @@ class TestEnvToPipelineKwargs:
             assert result["ignore_dirs"] == {"node_modules", "build"}
             assert result["orchestration_stages"] == ["analysis", "execution"]
             assert result["service_scope"] == ["auth", "api"]
+
+
+# ---------------------------------------------------------------------------
+# _prepare_project_if_needed
+# ---------------------------------------------------------------------------
+
+class TestPrepareProjectIfNeeded:
+    @pytest.mark.asyncio
+    async def test_returns_none_if_project_not_found(self):
+        from ora_automation_api.service import _prepare_project_if_needed
+
+        mock_db = MagicMock()
+        mock_db.get.return_value = None
+
+        result = await _prepare_project_if_needed(mock_db, "nonexistent-id")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_existing_local_path_if_valid(self):
+        import tempfile
+        from ora_automation_api.service import _prepare_project_if_needed
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_project = MagicMock()
+            mock_project.local_path = tmpdir
+
+            mock_db = MagicMock()
+            mock_db.get.return_value = mock_project
+
+            result = await _prepare_project_if_needed(mock_db, "project-id")
+            assert result == Path(tmpdir)
+
+    @pytest.mark.asyncio
+    async def test_returns_none_if_no_local_path_and_no_github_repo(self):
+        from ora_automation_api.service import _prepare_project_if_needed
+
+        mock_project = MagicMock()
+        mock_project.local_path = None
+        mock_project.github_repo_id = None
+
+        mock_db = MagicMock()
+        mock_db.get.return_value = mock_project
+
+        result = await _prepare_project_if_needed(mock_db, "project-id")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_if_github_repo_not_found(self):
+        from ora_automation_api.service import _prepare_project_if_needed
+
+        mock_project = MagicMock()
+        mock_project.local_path = None
+        mock_project.github_repo_id = "repo-id"
+
+        mock_db = MagicMock()
+        mock_db.get.side_effect = lambda model, id: (
+            mock_project if model.__name__ == "Project" else None
+        )
+
+        result = await _prepare_project_if_needed(mock_db, "project-id")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_clones_github_repo_and_updates_project(self):
+        from ora_automation_api.service import _prepare_project_if_needed
+
+        mock_project = MagicMock()
+        mock_project.local_path = None
+        mock_project.github_repo_id = "repo-id"
+        mock_project.source_type = "github_only"
+
+        mock_github_repo = MagicMock()
+        mock_github_repo.clone_url = "https://github.com/test/repo.git"
+        mock_github_repo.full_name = "test/repo"
+        mock_github_repo.default_branch = "main"
+
+        mock_db = MagicMock()
+
+        def get_side_effect(model, id):
+            if hasattr(model, "__name__"):
+                if model.__name__ == "Project":
+                    return mock_project
+                elif model.__name__ == "GithubRepo":
+                    return mock_github_repo
+            return None
+
+        mock_db.get.side_effect = get_side_effect
+
+        clone_path = Path("/tmp/clones/test/repo")
+
+        with patch("ora_automation_api.clone_service.ensure_local_clone") as mock_clone:
+            mock_clone.return_value = clone_path
+
+            result = await _prepare_project_if_needed(mock_db, "project-id")
+
+            assert result == clone_path
+            assert mock_project.local_path == str(clone_path)
+            assert mock_project.source_type == "github"
+            mock_db.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_clone_failure(self):
+        from ora_automation_api.service import _prepare_project_if_needed
+
+        mock_project = MagicMock()
+        mock_project.local_path = None
+        mock_project.github_repo_id = "repo-id"
+        mock_project.source_type = "github_only"
+
+        mock_github_repo = MagicMock()
+        mock_github_repo.clone_url = "https://github.com/test/repo.git"
+        mock_github_repo.full_name = "test/repo"
+        mock_github_repo.default_branch = "main"
+
+        mock_db = MagicMock()
+
+        def get_side_effect(model, id):
+            if hasattr(model, "__name__"):
+                if model.__name__ == "Project":
+                    return mock_project
+                elif model.__name__ == "GithubRepo":
+                    return mock_github_repo
+            return None
+
+        mock_db.get.side_effect = get_side_effect
+
+        with patch("ora_automation_api.clone_service.ensure_local_clone") as mock_clone:
+            mock_clone.side_effect = Exception("Clone failed")
+
+            result = await _prepare_project_if_needed(mock_db, "project-id")
+
+            assert result is None
+            mock_db.commit.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_nonexistent_local_path(self):
+        from ora_automation_api.service import _prepare_project_if_needed
+
+        mock_project = MagicMock()
+        mock_project.local_path = "/nonexistent/path/that/does/not/exist"
+        mock_project.github_repo_id = None
+
+        mock_db = MagicMock()
+        mock_db.get.return_value = mock_project
+
+        result = await _prepare_project_if_needed(mock_db, "project-id")
+        assert result is None
