@@ -12,6 +12,7 @@ Key capabilities:
 - **QA Program**: Automated QA pipeline with reporting
 - **Chatbot**: Gemini-powered assistant that understands user intent and triggers orchestration runs
 - **Natural Language Scheduling**: Chat-based scheduling — "매일 아침 9시에 보안 트렌드 분석해줘" → ScheduledJob 자동 생성
+- **GitHub App Integration**: Connect GitHub repos, auto-clone on-demand, unified project management
 
 ## Architecture
 
@@ -34,6 +35,10 @@ Key capabilities:
          │  Scheduler   │───>│ auto-publish
          │ (APScheduler)│    │ on completion
          └──────────────┘    └──────────────
+
+         ┌──────────────┐
+         │  GitHub App  │───> Webhooks → DB sync
+         └──────────────┘     (installations, repos)
 ```
 
 ### Autonomous Pipeline
@@ -49,13 +54,24 @@ Scheduler (poll DB) ──> create_run() ──> RabbitMQ ──> Worker
                                                   (report → pages)
 ```
 
+### GitHub Integration Flow
+
+```
+GitHub App Install ──> Webhook ──> GithubInstallation + GithubRepo (DB)
+                                          │
+User selects repo ──> Project (DB) ──> prepare endpoint ──> clone_service
+                                                                  │
+                                                            shallow clone
+                                                            (on-demand)
+```
+
 ## Tech Stack
 
 - **Backend**: Python 3.10+, FastAPI, SQLAlchemy 2, Pydantic 2, RabbitMQ (pika), APScheduler
 - **Frontend**: React 19, TypeScript 5.9, Vite 7
 - **Database**: PostgreSQL 16
 - **LLM**: Google Gemini (Vertex AI) — primary; OpenAI — fallback scripts
-- **External**: Notion API (report publishing)
+- **External**: Notion API (report publishing), GitHub App API
 - **Infrastructure**: Docker Compose (8 services), Make
 
 ## Project Structure
@@ -80,10 +96,16 @@ ora-automation/
 │   │   ├── report_builder.py     # Markdown + JSON report gen
 │   │   └── personas/             # 24 YAML agent definitions (Toss silo structure)
 │   │
-│   └── ora_automation_api/       # FastAPI backend
+│   └── ora_automation_api/       # FastAPI backend (29 modules)
 │       ├── main.py               # App entry, router registration, DDL migration
 │       ├── chat_router.py        # Chat + conversations + reports + projects
 │       ├── org_router.py         # Organization CRUD + agents/silos/chapters
+│       ├── github_router.py      # GitHub App webhooks + installation management
+│       ├── github_client.py      # GitHub API client (JWT auth, installation tokens)
+│       ├── projects_router.py    # Unified projects API (CRUD, scan, prepare)
+│       ├── project_service.py    # Local workspace sync + GitHub matching
+│       ├── clone_service.py      # On-demand shallow clone + pull
+│       ├── local_scanner.py      # Git repo detection + language inference
 │       ├── dialog_engine.py      # UPCE dialog engine (intent→action)
 │       ├── notion_client.py      # Notion REST API client (retry, backoff)
 │       ├── notion_publisher.py   # Report JSON → Notion pages/blocks
@@ -92,25 +114,53 @@ ora-automation/
 │       ├── scheduler_router.py   # Scheduler CRUD API
 │       ├── scheduling_handler.py # NL scheduling → ScheduledJob (validate + create)
 │       ├── schemas.py            # Pydantic request/response models
-│       ├── models.py             # SQLAlchemy ORM (+ Organization, ScheduledJob)
+│       ├── models.py             # SQLAlchemy ORM (Organization, Project, GithubRepo, etc.)
 │       ├── database.py           # DB session management
 │       ├── config.py             # API settings (env vars)
-│       ├── service.py            # Run execution logic + auto-publish hook
+│       ├── service.py            # Run execution logic + auto-publish hook + project prep
+│       ├── plan_utils.py         # Environment key mapping for orchestration
 │       ├── queue.py              # RabbitMQ message routing
 │       ├── worker.py             # Agent worker process
-│       └── llm_planner.py        # LLM plan adapter
+│       ├── llm_planner.py        # LLM plan adapter
+│       ├── org_templates.py      # Preset org templates (Toss, Startup, etc.)
+│       ├── exceptions.py         # Custom exception classes
+│       └── logging_config.py     # Structured logging setup
 │
-├── frontend/                     # React + Vite SPA
+├── frontend/                     # React + Vite SPA (23 components)
 │   └── src/
-│       ├── App.tsx               # Main app (conversation state)
+│       ├── App.tsx               # Main app (conversation state, routing)
 │       ├── components/
-│       │   ├── Sidebar.tsx       # Conversation list, search, date groups
-│       │   ├── ChatWindow.tsx    # Message display + input
-│       │   ├── MessageBubble.tsx # Single message rendering
-│       │   └── SchedulerPanel.tsx # Scheduled job management UI
-│       ├── lib/api.ts            # Typed API client
+│       │   ├── Sidebar.tsx           # Navigation + conversation list
+│       │   ├── ChatWindow.tsx        # Message display + input
+│       │   ├── ChatList.tsx          # Conversation list with search
+│       │   ├── ChatContextBar.tsx    # Org/project context display
+│       │   ├── MessageBubble.tsx     # Single message rendering
+│       │   ├── NewChatModal.tsx      # New conversation (org/project selection)
+│       │   ├── ProjectSelectCard.tsx # Project selection card (source badges)
+│       │   ├── ProjectListPanel.tsx  # Project list with filters
+│       │   ├── GitHubSettings.tsx    # GitHub App installation management
+│       │   ├── SettingsPanel.tsx     # Settings (GitHub, Projects tabs)
+│       │   ├── SchedulerPanel.tsx    # Scheduled job management UI
+│       │   ├── OrgPanel.tsx          # Organization management
+│       │   ├── OrgEditor.tsx         # Org detail editor
+│       │   ├── OrgDesigner.tsx       # Visual org structure designer
+│       │   ├── OrgChart.tsx          # Org hierarchy visualization
+│       │   ├── OrgSwitcher.tsx       # Org dropdown selector
+│       │   ├── OrgTemplateModal.tsx  # Org template selection
+│       │   ├── AgentEditor.tsx       # Agent CRUD form
+│       │   ├── ChapterEditor.tsx     # Chapter CRUD form
+│       │   ├── GuestAgentPicker.tsx  # Cross-org agent borrowing
+│       │   ├── ReportList.tsx        # Report file browser
+│       │   ├── ReportViewer.tsx      # Markdown report viewer
+│       │   └── Toast.tsx             # Notification toasts
+│       ├── lib/
+│       │   ├── api.ts            # Typed API client (chat, orgs, github, projects)
+│       │   ├── orgTemplates.ts   # Frontend org templates
+│       │   ├── sidebarConfig.ts  # Sidebar menu configuration
+│       │   └── hooks/            # Custom React hooks
 │       └── types.ts              # Shared TypeScript types
 │
+├── tests/                        # 455 pytest tests
 ├── scripts/                      # Shell + Python utilities
 ├── automations/                  # Orchestration config (research, e2e, qa)
 ├── research_reports/             # Output directory
@@ -194,6 +244,17 @@ except Exception:
 - Guests participate in Level 3 deliberation (`is_clevel=True`)
 - Guest agent IDs are prefixed with `guest_` and display names with `[Guest]`
 
+### GitHub App Integration
+- **Models**: `GithubInstallation`, `GithubRepo`, `Project` in `models.py`
+- **Webhook handling**: `github_router.py` processes `installation`, `installation_repositories` events
+- **JWT Auth**: `github_client.py` generates JWT tokens for GitHub API calls
+- **On-demand clone**: `clone_service.py` performs shallow clones when project is accessed
+- **Project types**:
+  - `local`: Existing local directory
+  - `github`: Local clone linked to GitHub repo
+  - `github_only`: Remote-only, cloned on-demand via `prepare` endpoint
+- **Auto-prepare**: `service.py` calls `_prepare_project_if_needed()` before orchestration runs
+
 ### Idempotent Sync (Notion)
 - `notion_sync_state` table tracks all Notion page/DB IDs with `(entity_type, entity_key)` unique constraint
 - Setup, publish, sync endpoints all check existing state before creating — safe to call repeatedly
@@ -224,10 +285,25 @@ except Exception:
 - `GET /api/v1/orchestrations[/{id}]` — List/get runs
 - `POST /api/v1/orchestrations/{id}/{cancel|pause|resume}` — Control
 
-**Reports & Projects:**
+**Reports & Projects (Legacy):**
 - `GET /api/v1/reports` — List research reports
 - `GET /api/v1/reports/{filename}` — Download report
-- `GET /api/v1/projects` — List Ora sub-projects
+- `GET /api/v1/projects` — List Ora sub-projects (legacy scanner)
+
+**Unified Projects:**
+- `GET /api/v1/unified-projects` — List all projects (filter by source_type, enabled, search)
+- `POST /api/v1/unified-projects` — Create project
+- `GET/PATCH/DELETE /api/v1/unified-projects/{id}` — Project CRUD
+- `POST /api/v1/unified-projects/scan-local` — Scan local workspace + sync to DB
+- `POST /api/v1/unified-projects/{id}/prepare` — Ensure local clone exists
+
+**GitHub Integration:**
+- `GET /api/v1/github/install-url` — Get GitHub App installation URL
+- `POST /api/v1/github/webhook` — GitHub webhook receiver
+- `GET /api/v1/github/installations` — List connected installations
+- `DELETE /api/v1/github/installations/{id}` — Remove installation
+- `GET /api/v1/github/installations/{id}/repos` — List repos for installation
+- `POST /api/v1/github/installations/{id}/sync` — Sync repos from GitHub
 
 **Notion Integration:**
 - `POST /api/v1/notion/setup` — Create Hub + DBs in Notion (idempotent)
@@ -266,6 +342,12 @@ except Exception:
 - `ORA_AUTOMATION_ROOT` — Path to ora-automation directory
 - `ORA_PROJECTS_ROOT` — Parent directory for project scanning
 
+### GitHub App Integration
+- `GITHUB_APP_ID` — GitHub App ID
+- `GITHUB_APP_PRIVATE_KEY` — GitHub App private key (PEM format, can be base64-encoded)
+- `GITHUB_WEBHOOK_SECRET` — Webhook signature verification secret
+- `ORA_CLONE_BASE_DIR` — Base directory for on-demand clones (default: `/tmp/ora-clones`)
+
 ### Orchestration Tuning
 - `ORCHESTRATION_PROFILE` — `standard` or `strict`
 - `DEBATE_ROUNDS` — Number of debate rounds (default: 2)
@@ -290,14 +372,14 @@ except Exception:
 ## Testing
 
 ```bash
-# All Python tests (304 tests — chat, dialog, notion, scheduler, orgs, convergence, guest)
+# All Python tests (455 tests — chat, dialog, notion, scheduler, orgs, convergence, guest, github, projects)
 PYTHONPATH=src python3 -m pytest tests/ -v
 
 # TypeScript type check
 cd frontend && npx tsc --noEmit
 
 # Frontend build
-cd frontend && npx vite build
+cd frontend && npm run build
 
 # Python import check
 PYTHONPATH=src python3 -c "from ora_automation_api.config import settings; print(settings.database_url)"
@@ -311,7 +393,9 @@ make qa-program
 - Notion tests patch `ora_automation_api.notion_router.settings` directly (not `os.environ`)
 - Scheduler poll tests patch `ora_automation_api.queue.publish_run` (lazy import via `from . import queue as _queue`)
 - Scheduling intent tests use in-memory SQLite directly (no API mock needed — pure logic + DB)
-- All Notion API calls are mocked — no real API calls in tests
+- GitHub router tests use in-memory SQLite with `TESTING=1` env to skip lifespan
+- Clone service tests mock `asyncio.create_subprocess_exec` for git commands
+- All external API calls (Notion, GitHub) are mocked — no real API calls in tests
 
 ## Git Commit Rules
 
