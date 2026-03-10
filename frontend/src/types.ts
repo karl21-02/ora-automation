@@ -103,6 +103,7 @@ export interface Conversation {
   createdAt: Date
   orgId?: string | null
   orgName?: string | null
+  selectedProjects?: string[]
 }
 
 // ── Scheduler ──────────────────────────────────────────────────────
