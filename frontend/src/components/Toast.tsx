@@ -1,7 +1,17 @@
-import { useEffect } from 'react'
-import { CheckCircle, XCircle, Loader2 } from 'lucide-react'
+// Legacy Toast component for backwards compatibility
+// New code should use useToast hook instead
 
-export type ToastType = 'success' | 'error' | 'loading'
+import { useEffect, useState } from 'react'
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle,
+  Info,
+  Loader2,
+  X,
+} from 'lucide-react'
+
+export type ToastType = 'success' | 'error' | 'warning' | 'info' | 'loading'
 
 interface ToastProps {
   message: string
@@ -10,67 +20,61 @@ interface ToastProps {
   duration?: number
 }
 
-export default function Toast({ message, type, onClose, duration = 2500 }: ToastProps) {
-  useEffect(() => {
-    if (type === 'loading') return // Don't auto-close loading toasts
-    const timer = setTimeout(onClose, duration)
-    return () => clearTimeout(timer)
-  }, [type, duration, onClose])
+const ICONS: Record<ToastType, typeof CheckCircle> = {
+  success: CheckCircle,
+  error: AlertCircle,
+  warning: AlertTriangle,
+  info: Info,
+  loading: Loader2,
+}
 
-  const Icon = type === 'success' ? CheckCircle : type === 'error' ? XCircle : Loader2
+export default function Toast({ message, type, onClose, duration = 3000 }: ToastProps) {
+  const [isExiting, setIsExiting] = useState(false)
+
+  useEffect(() => {
+    if (type === 'loading') return
+
+    const timer = setTimeout(() => {
+      setIsExiting(true)
+    }, duration)
+
+    return () => clearTimeout(timer)
+  }, [type, duration])
+
+  useEffect(() => {
+    if (isExiting) {
+      const timer = setTimeout(onClose, 200)
+      return () => clearTimeout(timer)
+    }
+  }, [isExiting, onClose])
+
+  const handleDismiss = () => {
+    setIsExiting(true)
+  }
+
+  const Icon = ICONS[type]
 
   return (
-    <div style={containerStyle}>
-      <div style={{ ...toastStyle, backgroundColor: bgColors[type] }}>
+    <div className="toast-container">
+      <div
+        className={`toast toast-${type} ${isExiting ? 'toast-exit' : ''}`}
+        role="alert"
+      >
         <Icon
-          size={16}
-          color={iconColors[type]}
-          style={type === 'loading' ? { animation: 'spin 1s linear infinite' } : undefined}
+          size={18}
+          className={`toast-icon ${type === 'loading' ? 'toast-icon-spin' : ''}`}
         />
-        <span style={{ color: textColors[type] }}>{message}</span>
+        <span className="toast-message">{message}</span>
+        {type !== 'loading' && (
+          <button
+            className="toast-close"
+            onClick={handleDismiss}
+            aria-label="Dismiss"
+          >
+            <X size={14} />
+          </button>
+        )}
       </div>
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   )
-}
-
-const containerStyle: React.CSSProperties = {
-  position: 'fixed',
-  bottom: 24,
-  right: 24,
-  zIndex: 1000,
-}
-
-const toastStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  padding: '10px 16px',
-  borderRadius: 8,
-  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-  fontSize: 13,
-  fontWeight: 500,
-}
-
-const bgColors: Record<ToastType, string> = {
-  success: '#ecfdf5',
-  error: '#fef2f2',
-  loading: '#f0f9ff',
-}
-
-const iconColors: Record<ToastType, string> = {
-  success: '#10b981',
-  error: '#ef4444',
-  loading: '#3b82f6',
-}
-
-const textColors: Record<ToastType, string> = {
-  success: '#065f46',
-  error: '#991b1b',
-  loading: '#1e40af',
 }
