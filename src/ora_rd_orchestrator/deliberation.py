@@ -330,3 +330,55 @@ def llm_deliberation_round(
     meta = {"status": "ok", "result": response}
 
     return score_adjustments, parsed_decisions, [round_summary] if round_summary else [], action_log, meta
+
+
+# ---------------------------------------------------------------------------
+# Structured Debate Integration (Phase D)
+# ---------------------------------------------------------------------------
+
+def run_structured_deliberation(
+    topics: dict[str, TopicState],
+    initial_scores: dict[str, dict[str, float]],
+    agent_ids: list[str],
+    agent_definitions: dict[str, dict[str, Any]],
+    max_rounds: int = 3,
+    command: str | None = None,
+    timeout: float = LLM_DELIBERATION_TIMEOUT_SECONDS,
+) -> tuple[dict[str, dict[str, ScoreAdjustment]], dict[str, Any]]:
+    """Run structured debate (Advocate → Challenger → Mediation) for all topics.
+
+    This is an alternative to the standard llm_deliberation_round that uses
+    a more formal debate structure for higher-quality deliberation.
+
+    Args:
+        topics: {topic_id: TopicState}
+        initial_scores: {topic_id: {agent_key: score}}
+        agent_ids: List of participating agent IDs
+        agent_definitions: Agent definitions {agent_id: {...}}
+        max_rounds: Maximum debate rounds per topic
+        command: LLM command override
+        timeout: LLM timeout in seconds
+
+    Returns:
+        Tuple of (score_adjustments, debate_metadata)
+        - score_adjustments: {topic_id: {agent_id: ScoreAdjustment}}
+        - debate_metadata: Full StructuredDebateResult.to_dict()
+    """
+    from .structured_debate import (
+        extract_score_adjustments_from_debate,
+        run_structured_debate,
+    )
+
+    result = run_structured_debate(
+        topics=topics,
+        initial_scores=initial_scores,
+        agent_ids=agent_ids,
+        agent_definitions=agent_definitions,
+        max_rounds=max_rounds,
+        command=command,
+        timeout=timeout,
+    )
+
+    score_adjustments = extract_score_adjustments_from_debate(result)
+
+    return score_adjustments, result.to_dict()
