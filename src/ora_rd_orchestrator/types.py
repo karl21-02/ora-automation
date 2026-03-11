@@ -29,6 +29,16 @@ class DebateEvent:
 
 
 @dataclass
+class ScoreAdjustment:
+    """Score adjustment from an agent with confidence level."""
+    delta: float
+    confidence: float = 0.5  # 0.0 ~ 1.0, default mid confidence
+
+    def to_dict(self) -> dict:
+        return {"delta": self.delta, "confidence": self.confidence}
+
+
+@dataclass
 class OrchestrationDecision:
     decision_id: str
     owner: str

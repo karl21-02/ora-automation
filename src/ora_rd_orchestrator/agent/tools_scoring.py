@@ -99,14 +99,20 @@ def _handle_run_deliberation(
             agent_definitions=state.agent_definitions,
         )
 
-        # Apply score adjustments
+        # Apply score adjustments (supports both ScoreAdjustment v2 and float v1)
+        from ..types import ScoreAdjustment
         for topic_id, per_agent in score_updates.items():
             if topic_id not in state.scores:
                 continue
-            for agent_name, delta in per_agent.items():
+            for agent_name, adjustment in per_agent.items():
                 agent_key = _agent_score_key(agent_name)
                 if agent_key not in state.scores[topic_id]:
                     continue
+                # Handle both ScoreAdjustment and legacy float
+                if isinstance(adjustment, ScoreAdjustment):
+                    delta = adjustment.delta
+                else:
+                    delta = float(adjustment)
                 state.scores[topic_id][agent_key] = _clamp_score(
                     state.scores[topic_id][agent_key] + delta, 0.0, 10.0
                 )

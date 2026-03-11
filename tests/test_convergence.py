@@ -23,6 +23,8 @@ requires_langgraph = pytest.mark.skipif(
 from ora_rd_orchestrator.convergence import (
     _aggregate_chapter_scores,
     _build_ranked_from_scores,
+    _compute_average,
+    _compute_weighted_average,
     _flatten_scores,
     _group_agents_by_chapter,
     _group_chapters_by_silo,
@@ -748,3 +750,188 @@ class TestDataclasses:
         assert s.level3_rounds == 0
         assert s.final_scores == {}
         assert s.decisions == []
+
+
+# ---------------------------------------------------------------------------
+# Weighted Average Tests (Phase A)
+# ---------------------------------------------------------------------------
+
+class TestWeightedAverage:
+    """Tests for confidence-weighted average computation."""
+
+    def test_simple_weighted_average(self):
+        # Agent A: score 8.0 with 0.9 confidence
+        # Agent B: score 4.0 with 0.3 confidence
+        # Expected: (8*0.9 + 4*0.3) / (0.9 + 0.3) = 8.4 / 1.2 = 7.0
+        result = _compute_weighted_average([(8.0, 0.9), (4.0, 0.3)])
+        assert result == 7.0
+
+    def test_equal_confidence_equals_simple_average(self):
+        # With equal confidence, should equal simple average
+        result = _compute_weighted_average([(6.0, 0.5), (8.0, 0.5)])
+        expected = _compute_average([6.0, 8.0])
+        assert result == expected
+
+    def test_high_confidence_dominates(self):
+        # Agent A: score 9.0 with 1.0 confidence (certain)
+        # Agent B: score 3.0 with 0.1 confidence (very uncertain)
+        # Expected: heavily weighted towards 9.0
+        result = _compute_weighted_average([(9.0, 1.0), (3.0, 0.1)])
+        assert result > 8.0  # Should be close to 9.0
+
+    def test_zero_confidence_fallback_to_simple_average(self):
+        # When all confidence is 0, should fall back to simple average
+        result = _compute_weighted_average([(6.0, 0.0), (8.0, 0.0)])
+        expected = _compute_average([6.0, 8.0])
+        assert result == expected
+
+    def test_empty_list_returns_zero(self):
+        result = _compute_weighted_average([])
+        assert result == 0.0
+
+    def test_single_value(self):
+        result = _compute_weighted_average([(7.5, 0.8)])
+        assert result == 7.5
+
+    def test_rounding(self):
+        # Should round to 4 decimal places by default
+        result = _compute_weighted_average([(1.0, 0.3), (2.0, 0.7)], decimals=4)
+        # (1*0.3 + 2*0.7) / 1.0 = 1.7
+        assert result == 1.7
+
+    def test_mixed_confidence_levels(self):
+        # Three agents with varying confidence
+        values = [
+            (10.0, 1.0),   # Very confident: 10
+            (5.0, 0.5),    # Moderately confident: 5
+            (0.0, 0.1),    # Very uncertain: 0
+        ]
+        result = _compute_weighted_average(values)
+        # (10*1.0 + 5*0.5 + 0*0.1) / (1.0 + 0.5 + 0.1) = 12.5 / 1.6 = 7.8125
+        assert result == 7.8125
+
+
+# ---------------------------------------------------------------------------
+# Apply Score Updates with Confidence Tests (Phase A-5)
+# ---------------------------------------------------------------------------
+
+class TestApplyScoreUpdatesWithConfidence:
+    """Tests for confidence-weighted score updates in _apply_score_updates."""
+
+    def test_weighted_delta_application(self):
+        from ora_rd_orchestrator.convergence import _apply_score_updates
+        from ora_rd_orchestrator.types import ScoreAdjustment
+
+        # Key must match _agent_score_key("testagent") = "testagent"
+        working_scores = {"t1": {"testagent": 5.0}}
+        score_updates = {
+            "t1": {"testagent": ScoreAdjustment(delta=2.0, confidence=0.5)}
+        }
+
+        _apply_score_updates(working_scores, score_updates, use_weighted=True)
+
+        # delta * confidence = 2.0 * 0.5 = 1.0
+        # final = 5.0 + 1.0 = 6.0
+        assert working_scores["t1"]["testagent"] == 6.0
+
+    def test_high_confidence_full_delta(self):
+        from ora_rd_orchestrator.convergence import _apply_score_updates
+        from ora_rd_orchestrator.types import ScoreAdjustment
+
+        working_scores = {"t1": {"testagent": 5.0}}
+        score_updates = {
+            "t1": {"testagent": ScoreAdjustment(delta=2.0, confidence=1.0)}
+        }
+
+        _apply_score_updates(working_scores, score_updates, use_weighted=True)
+
+        # delta * confidence = 2.0 * 1.0 = 2.0
+        assert working_scores["t1"]["testagent"] == 7.0
+
+    def test_low_confidence_minimal_delta(self):
+        from ora_rd_orchestrator.convergence import _apply_score_updates
+        from ora_rd_orchestrator.types import ScoreAdjustment
+
+        working_scores = {"t1": {"testagent": 5.0}}
+        score_updates = {
+            "t1": {"testagent": ScoreAdjustment(delta=2.0, confidence=0.1)}
+        }
+
+        _apply_score_updates(working_scores, score_updates, use_weighted=True)
+
+        # delta * confidence = 2.0 * 0.1 = 0.2
+        assert working_scores["t1"]["testagent"] == 5.2
+
+    def test_unweighted_mode_ignores_confidence(self):
+        from ora_rd_orchestrator.convergence import _apply_score_updates
+        from ora_rd_orchestrator.types import ScoreAdjustment
+
+        working_scores = {"t1": {"testagent": 5.0}}
+        score_updates = {
+            "t1": {"testagent": ScoreAdjustment(delta=2.0, confidence=0.1)}
+        }
+
+        _apply_score_updates(working_scores, score_updates, use_weighted=False)
+
+        # Without weighting, full delta is applied
+        assert working_scores["t1"]["testagent"] == 7.0
+
+    def test_legacy_float_format_default_confidence(self):
+        from ora_rd_orchestrator.convergence import _apply_score_updates
+
+        working_scores = {"t1": {"testagent": 5.0}}
+        score_updates = {"t1": {"testagent": 2.0}}  # Legacy float format
+
+        _apply_score_updates(working_scores, score_updates, use_weighted=True)
+
+        # Legacy format uses default confidence 0.5
+        # delta * confidence = 2.0 * 0.5 = 1.0
+        assert working_scores["t1"]["testagent"] == 6.0
+
+    def test_clamping_respects_bounds(self):
+        from ora_rd_orchestrator.convergence import _apply_score_updates
+        from ora_rd_orchestrator.types import ScoreAdjustment
+
+        # Test upper bound
+        working_scores = {"t1": {"testagent": 9.5}}
+        score_updates = {
+            "t1": {"testagent": ScoreAdjustment(delta=2.0, confidence=1.0)}
+        }
+
+        _apply_score_updates(working_scores, score_updates, use_weighted=True)
+
+        # Should clamp to 10.0
+        assert working_scores["t1"]["testagent"] == 10.0
+
+        # Test lower bound
+        working_scores = {"t1": {"testagent": 0.5}}
+        score_updates = {
+            "t1": {"testagent": ScoreAdjustment(delta=-2.0, confidence=1.0)}
+        }
+
+        _apply_score_updates(working_scores, score_updates, use_weighted=True)
+
+        # Should clamp to 0.0
+        assert working_scores["t1"]["testagent"] == 0.0
+
+    def test_multiple_agents_independent_updates(self):
+        from ora_rd_orchestrator.convergence import _apply_score_updates
+        from ora_rd_orchestrator.types import ScoreAdjustment
+
+        working_scores = {
+            "t1": {
+                "agent_a": 5.0,
+                "agent_b": 5.0,
+            }
+        }
+        score_updates = {
+            "t1": {
+                "agent_a": ScoreAdjustment(delta=2.0, confidence=0.8),  # +1.6
+                "agent_b": ScoreAdjustment(delta=-1.0, confidence=0.5),  # -0.5
+            }
+        }
+
+        _apply_score_updates(working_scores, score_updates, use_weighted=True)
+
+        assert working_scores["t1"]["agent_a"] == 6.6
+        assert working_scores["t1"]["agent_b"] == 4.5

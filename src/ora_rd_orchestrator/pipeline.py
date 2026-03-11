@@ -82,6 +82,7 @@ from .types import (
     OrchestrationDecision,
     PipelineCancelled,
     ProgressCallback,
+    ScoreAdjustment,
     TierResult,
     TopicState,
 )
@@ -882,14 +883,19 @@ def generate_report(
                 agent_definitions=agent_definitions,
             )
 
-            # Apply score adjustments
+            # Apply score adjustments (supports both ScoreAdjustment v2 and float v1)
             for topic_id, per_agent in score_updates.items():
                 if topic_id not in scores:
                     continue
-                for agent_name, delta in per_agent.items():
+                for agent_name, adjustment in per_agent.items():
                     agent_key = _agent_score_key(agent_name)
                     if agent_key not in scores[topic_id]:
                         continue
+                    # Handle both ScoreAdjustment and legacy float
+                    if isinstance(adjustment, ScoreAdjustment):
+                        delta = adjustment.delta
+                    else:
+                        delta = float(adjustment)
                     scores[topic_id][agent_key] = _clamp_score(
                         scores[topic_id][agent_key] + delta, 0.0, 10.0
                     )

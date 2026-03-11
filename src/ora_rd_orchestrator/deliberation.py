@@ -23,7 +23,7 @@ from .config import (
     _normalize_services,
 )
 from .llm_client import run_llm_command
-from .types import OrchestrationDecision, TopicState
+from .types import OrchestrationDecision, ScoreAdjustment, TopicState
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ def llm_deliberation_round(
     timeout: float = LLM_DELIBERATION_TIMEOUT_SECONDS,
     agent_definitions: dict[str, dict[str, Any]] | None = None,
     known_agent_ids: set[str] | None = None,
-) -> tuple[dict[str, dict[str, float]], list[OrchestrationDecision], list[dict], list[dict], dict]:
+) -> tuple[dict[str, dict[str, ScoreAdjustment]], list[OrchestrationDecision], list[dict], list[dict], dict]:
     """Execute a single LLM deliberation round.
 
     Returns (score_adjustments, decisions, round_summaries, action_log, meta).
@@ -173,9 +173,26 @@ def llm_deliberation_round(
 
     _defs = agent_definitions or {}
     payload = {
-        "version": "llm-deliberation-v1",
+        "version": "llm-deliberation-v2",
+        "instructions": {
+            "confidence_guide": (
+                "Each score adjustment MUST include a confidence value (0.0~1.0). "
+                "confidence reflects how certain the agent is about the adjustment: "
+                "0.9+ = very high certainty (strong evidence, clear rationale), "
+                "0.7~0.9 = high certainty (good evidence, solid reasoning), "
+                "0.5~0.7 = moderate certainty (some evidence, reasonable inference), "
+                "0.3~0.5 = low certainty (limited evidence, speculative), "
+                "0.0~0.3 = very low certainty (no evidence, pure guess). "
+                "Higher confidence adjustments will have more weight in final scoring."
+            ),
+            "scoring_rules": (
+                "Adjustments are weighted by confidence when aggregating across agents. "
+                "A +2.0 adjustment with 0.9 confidence has more impact than +2.0 with 0.3 confidence. "
+                "Be honest about uncertainty - overconfident scores reduce overall system reliability."
+            ),
+        },
         "output_contract": {
-            "score_adjustments": "topic_id -> {agent_name_or_key: -3.0~3.0}",
+            "score_adjustments": "topic_id -> {agent_name_or_key: {delta: -3.0~3.0, confidence: 0.0~1.0}}",
             "decisions": [
                 {
                     "decision_id": "string",
@@ -246,7 +263,7 @@ def llm_deliberation_round(
     )
 
     _agent_ids = known_agent_ids or set(_defs.keys())
-    score_adjustments: dict[str, dict[str, float]] = {topic_id: {} for topic_id in states}
+    score_adjustments: dict[str, dict[str, ScoreAdjustment]] = {topic_id: {} for topic_id in states}
     action_log: list[dict] = []
     parsed_decisions: list[OrchestrationDecision] = []
 
@@ -260,7 +277,7 @@ def llm_deliberation_round(
 
     response = result.parsed
 
-    # Parse score adjustments
+    # Parse score adjustments (supports both v1 and v2 formats)
     updates = response.get("score_adjustments")
     if isinstance(updates, dict):
         for topic_id, per_agent in updates.items():
@@ -268,15 +285,31 @@ def llm_deliberation_round(
                 continue
             if not isinstance(per_agent, dict):
                 continue
-            for agent, delta in per_agent.items():
+            for agent, value in per_agent.items():
                 agent_clean = agent.replace("score_", "")
                 if agent_clean not in _agent_ids and agent not in _agent_ids:
                     continue
-                try:
-                    parsed_delta = _clamp_score(float(delta), -3.0, 3.0)
-                except (TypeError, ValueError):
-                    continue
-                score_adjustments[topic_id][agent_clean] = parsed_delta
+                # Parse both formats:
+                # v1: {"agent": 1.5}
+                # v2: {"agent": {"delta": 1.5, "confidence": 0.9}}
+                if isinstance(value, dict):
+                    # v2 format with confidence
+                    try:
+                        parsed_delta = _clamp_score(float(value.get("delta", 0.0)), -3.0, 3.0)
+                        parsed_confidence = _coerce_confidence(value.get("confidence", 0.5), 0.5)
+                    except (TypeError, ValueError):
+                        continue
+                else:
+                    # v1 format (just float delta, default confidence)
+                    try:
+                        parsed_delta = _clamp_score(float(value), -3.0, 3.0)
+                        parsed_confidence = 0.5  # default mid confidence for v1
+                    except (TypeError, ValueError):
+                        continue
+                score_adjustments[topic_id][agent_clean] = ScoreAdjustment(
+                    delta=parsed_delta,
+                    confidence=parsed_confidence,
+                )
 
     # Parse decisions
     decision_items = response.get("decisions")

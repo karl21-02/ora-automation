@@ -31,6 +31,7 @@ from .types import (
     ConvergencePipelineState,
     OrchestrationDecision,
     ProgressCallback,
+    ScoreAdjustment,
     SiloDeliberationResult,
     TopicState,
 )
@@ -49,6 +50,33 @@ def _compute_average(values: list[float], decimals: int = 4) -> float:
     if not values:
         return 0.0
     return round(sum(values) / len(values), decimals)
+
+
+def _compute_weighted_average(
+    values_with_confidence: list[tuple[float, float]],
+    decimals: int = 4,
+) -> float:
+    """Compute confidence-weighted average.
+
+    Args:
+        values_with_confidence: List of (value, confidence) tuples.
+            confidence should be 0.0 ~ 1.0
+        decimals: Number of decimal places to round to.
+
+    Returns:
+        Weighted average, or simple average if total confidence is 0.
+    """
+    if not values_with_confidence:
+        return 0.0
+
+    total_confidence = sum(conf for _, conf in values_with_confidence)
+
+    # If all confidence is 0, fall back to simple average
+    if total_confidence <= 0:
+        return _compute_average([v for v, _ in values_with_confidence], decimals)
+
+    weighted_sum = sum(value * conf for value, conf in values_with_confidence)
+    return round(weighted_sum / total_confidence, decimals)
 
 
 # ---------------------------------------------------------------------------
@@ -236,21 +264,44 @@ def _build_mock_topic_catalog(topic_ids: list[str]) -> dict[str, Any]:
 
 def _apply_score_updates(
     working_scores: dict[str, dict[str, float]],
-    score_updates: dict,
+    score_updates: dict[str, dict[str, ScoreAdjustment | float]],
+    use_weighted: bool = True,
 ) -> None:
     """Apply score deltas with 0-10 clamping (in-place).
 
+    When use_weighted=True and multiple adjustments exist for the same agent,
+    uses confidence-weighted averaging. Otherwise applies simple sum.
+
+    Supports both ScoreAdjustment (v2) and float (v1 legacy) formats.
+
     Args:
         working_scores: Current scores dict {topic_id: {agent_key: score}}
-        score_updates: Updates from LLM {topic_id: {agent_name: delta}}
+        score_updates: Updates from LLM {topic_id: {agent_name: ScoreAdjustment | float}}
+        use_weighted: If True, weight delta by confidence before applying
     """
     for tid, per_agent in score_updates.items():
         if tid not in working_scores:
             continue
-        for agent_name, delta in per_agent.items():
+        for agent_name, adjustment in per_agent.items():
             key = _agent_score_key(agent_name)
             if key in working_scores[tid]:
-                new_val = working_scores[tid][key] + delta
+                # Handle both ScoreAdjustment and legacy float
+                if isinstance(adjustment, ScoreAdjustment):
+                    delta = adjustment.delta
+                    confidence = adjustment.confidence
+                else:
+                    delta = float(adjustment)
+                    confidence = 0.5  # default for legacy format
+
+                # Apply confidence-weighted delta
+                if use_weighted:
+                    # Scale delta by confidence (0.0~1.0)
+                    # High confidence = full delta, low confidence = reduced delta
+                    effective_delta = delta * confidence
+                else:
+                    effective_delta = delta
+
+                new_val = working_scores[tid][key] + effective_delta
                 working_scores[tid][key] = max(SCORE_MIN, min(SCORE_MAX, new_val))
 
 
