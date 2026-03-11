@@ -39,6 +39,80 @@ class ScoreAdjustment:
 
 
 @dataclass
+class TrustUpdate:
+    """Trust adjustment between two agents based on deliberation outcome.
+
+    Represents how much agent A's trust in agent B should change based on
+    how accurate/helpful B's contributions were in deliberation.
+    """
+    source_agent: str           # Agent whose trust_map is being updated
+    target_agent: str           # Agent being evaluated
+    delta: float                # Trust change: -0.2 ~ +0.2
+    confidence: float           # How confident we are in this update: 0.0 ~ 1.0
+    reason: str                 # LLM-generated explanation
+    evidence_topic_ids: list[str] = field(default_factory=list)  # Topics that informed this
+
+    def to_dict(self) -> dict:
+        return {
+            "source_agent": self.source_agent,
+            "target_agent": self.target_agent,
+            "delta": self.delta,
+            "confidence": self.confidence,
+            "reason": self.reason,
+            "evidence_topic_ids": self.evidence_topic_ids,
+        }
+
+
+@dataclass
+class TrustLearningResult:
+    """Result of trust learning after a deliberation session.
+
+    Contains all trust updates computed by analyzing deliberation outcomes.
+    """
+    updates: list[TrustUpdate] = field(default_factory=list)
+    meta: dict[str, Any] = field(default_factory=dict)  # LLM metadata, timing, etc.
+
+    def to_dict(self) -> dict:
+        return {
+            "updates": [u.to_dict() for u in self.updates],
+            "meta": self.meta,
+        }
+
+    def apply_to_trust_map(
+        self,
+        trust_map: dict[str, dict[str, float]],
+        min_trust: float = 0.1,
+        max_trust: float = 1.0,
+        decay_factor: float = 0.9,
+    ) -> dict[str, dict[str, float]]:
+        """Apply updates to trust_map in-place, with bounds and decay.
+
+        Args:
+            trust_map: {agent_id: {other_agent_id: trust_score}}
+            min_trust: Minimum trust value (prevents complete distrust)
+            max_trust: Maximum trust value
+            decay_factor: Applied to delta based on confidence
+
+        Returns:
+            Updated trust_map (same reference, modified in-place)
+        """
+        for update in self.updates:
+            src = update.source_agent
+            tgt = update.target_agent
+            if src not in trust_map:
+                trust_map[src] = {}
+
+            current = trust_map[src].get(tgt, 0.5)  # default neutral trust
+            # Scale delta by confidence
+            effective_delta = update.delta * update.confidence * decay_factor
+            new_trust = current + effective_delta
+            # Clamp to bounds
+            trust_map[src][tgt] = max(min_trust, min(max_trust, round(new_trust, 4)))
+
+        return trust_map
+
+
+@dataclass
 class OrchestrationDecision:
     decision_id: str
     owner: str
@@ -219,6 +293,8 @@ class ConvergencePipelineState:
     final_scores: dict[str, dict[str, float]] = field(default_factory=dict)
     decisions: list[OrchestrationDecision] = field(default_factory=list)
     execution_log: list[dict] = field(default_factory=list)
+    # Trust learning result (Phase B)
+    trust_learning_result: TrustLearningResult | None = None
 
 
 # ---------------------------------------------------------------------------

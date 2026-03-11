@@ -34,6 +34,7 @@ from .types import (
     ScoreAdjustment,
     SiloDeliberationResult,
     TopicState,
+    TrustLearningResult,
 )
 from .report_builder import _agent_score_key
 
@@ -949,8 +950,12 @@ def run_convergence_pipeline(
     stages: list[str],
     cancel_event: threading.Event | None = None,
     progress_callback: ProgressCallback = None,
+    enable_trust_learning: bool = True,
 ) -> ConvergencePipelineState:
     """Run the 3-level convergence pipeline.
+
+    Args:
+        enable_trust_learning: If True, run trust learning after deliberation
 
     Returns a ConvergencePipelineState with final_scores, decisions, and logs.
     """
@@ -998,7 +1003,69 @@ def run_convergence_pipeline(
 
     result = graph.invoke(initial_state)
 
-    return _to_convergence_state(result, topic_states)
+    # Convert to state object
+    convergence_state = _to_convergence_state(result, topic_states)
+
+    # Run trust learning if enabled
+    if enable_trust_learning and convergence_state.decisions:
+        if progress_callback:
+            try:
+                progress_callback("trust_learning", "Running trust learning analysis")
+            except Exception as exc:
+                logger.warning("Progress callback failed: %s", exc)
+
+        try:
+            trust_result = _run_trust_learning(
+                convergence_state=convergence_state,
+                agent_definitions=agent_definitions or {},
+                personas=personas,
+                llm_command=llm_command,
+                llm_timeout=llm_timeout,
+            )
+            convergence_state.trust_learning_result = trust_result
+        except Exception as exc:
+            logger.warning("Trust learning failed: %s", exc)
+            # Don't fail the pipeline, just log
+
+    return convergence_state
+
+
+def _run_trust_learning(
+    convergence_state: ConvergencePipelineState,
+    agent_definitions: dict[str, dict],
+    personas: dict[str, AgentPersona],
+    llm_command: str | None,
+    llm_timeout: float,
+) -> TrustLearningResult:
+    """Run trust learning based on convergence results."""
+    from .trust_learning import compute_trust_updates
+
+    # Build current trust map from personas
+    current_trust_map: dict[str, dict[str, float]] = {}
+    for agent_id, persona in personas.items():
+        if persona.trust_map:
+            current_trust_map[agent_id] = dict(persona.trust_map)
+
+    # Collect all score adjustments from execution log
+    # (simplified - in production would track actual adjustments)
+    score_adjustments: dict[str, dict[str, Any]] = {}
+
+    # Build deliberation history from execution log
+    deliberation_history = [
+        entry for entry in convergence_state.execution_log
+        if entry.get("type") in ("chapter", "silo", "deliberation")
+    ]
+
+    return compute_trust_updates(
+        deliberation_history=deliberation_history,
+        score_adjustments=score_adjustments,
+        final_scores=convergence_state.final_scores,
+        decisions=convergence_state.decisions,
+        agent_definitions=agent_definitions,
+        current_trust_map=current_trust_map,
+        command=llm_command,
+        timeout=llm_timeout,
+    )
 
 
 def _to_convergence_state(

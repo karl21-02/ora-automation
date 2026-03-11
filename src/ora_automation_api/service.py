@@ -922,3 +922,109 @@ def recover_stale_runs(stale_after_seconds: float | None = None) -> list[Executi
     finally:
         db.close()
     return outcomes
+
+
+# ---------------------------------------------------------------------------
+# Trust Map Persistence (Phase B)
+# ---------------------------------------------------------------------------
+
+def persist_trust_updates(
+    org_id: str,
+    trust_learning_result: dict,
+    db: Session | None = None,
+) -> dict:
+    """Persist trust learning results to agent trust_maps in database.
+
+    Args:
+        org_id: Organization ID
+        trust_learning_result: TrustLearningResult.to_dict() output
+        db: Optional DB session (creates new if None)
+
+    Returns:
+        Summary dict with counts of updates applied
+    """
+    from .database import SessionLocal
+
+    should_close = db is None
+    if db is None:
+        db = SessionLocal()
+
+    try:
+        updates = trust_learning_result.get("updates", [])
+        if not updates:
+            return {"status": "no_updates", "applied": 0}
+
+        # Load all agents for this org
+        agents = db.query(OrganizationAgent).filter(
+            OrganizationAgent.org_id == org_id
+        ).all()
+        agent_map = {a.agent_id: a for a in agents}
+
+        applied_count = 0
+        for update in updates:
+            source = update.get("source_agent", "")
+            target = update.get("target_agent", "")
+            delta = float(update.get("delta", 0.0))
+            confidence = float(update.get("confidence", 0.5))
+
+            if source not in agent_map:
+                continue
+
+            agent = agent_map[source]
+            current_trust = dict(agent.trust_map or {})
+            current_value = current_trust.get(target, 0.5)
+
+            # Apply update with decay
+            decay_factor = 0.9
+            effective_delta = delta * confidence * decay_factor
+            new_value = max(0.1, min(1.0, current_value + effective_delta))
+            new_value = round(new_value, 4)
+
+            if abs(new_value - current_value) > 0.001:
+                current_trust[target] = new_value
+                agent.trust_map = current_trust
+                db.add(agent)
+                applied_count += 1
+
+        db.commit()
+        return {"status": "ok", "applied": applied_count, "total": len(updates)}
+
+    except Exception as exc:
+        logger.exception("Failed to persist trust updates: %s", exc)
+        db.rollback()
+        return {"status": "error", "error": str(exc)}
+    finally:
+        if should_close:
+            db.close()
+
+
+def get_org_trust_map(org_id: str, db: Session | None = None) -> dict[str, dict[str, float]]:
+    """Get aggregated trust_map for all agents in an organization.
+
+    Args:
+        org_id: Organization ID
+        db: Optional DB session
+
+    Returns:
+        {agent_id: {target_agent_id: trust_score}}
+    """
+    from .database import SessionLocal
+
+    should_close = db is None
+    if db is None:
+        db = SessionLocal()
+
+    try:
+        agents = db.query(OrganizationAgent).filter(
+            OrganizationAgent.org_id == org_id,
+            OrganizationAgent.enabled == True,
+        ).all()
+
+        trust_map: dict[str, dict[str, float]] = {}
+        for agent in agents:
+            if agent.trust_map:
+                trust_map[agent.agent_id] = dict(agent.trust_map)
+        return trust_map
+    finally:
+        if should_close:
+            db.close()
