@@ -29,7 +29,9 @@ from .types import (
     AgentPersona,
     ChapterDeliberationResult,
     ConvergencePipelineState,
+    EvolutionResult,
     OrchestrationDecision,
+    PersonaLearningResult,
     ProgressCallback,
     ScoreAdjustment,
     SiloDeliberationResult,
@@ -1027,6 +1029,46 @@ def run_convergence_pipeline(
             logger.warning("Trust learning failed: %s", exc)
             # Don't fail the pipeline, just log
 
+        # Run persona learning (Phase C)
+        if progress_callback:
+            try:
+                progress_callback("persona_learning", "Running persona learning analysis")
+            except Exception as exc:
+                logger.warning("Progress callback failed: %s", exc)
+
+        try:
+            persona_result = _run_persona_learning(
+                convergence_state=convergence_state,
+                agent_definitions=agent_definitions or {},
+                personas=personas,
+                llm_command=llm_command,
+                llm_timeout=llm_timeout,
+            )
+            convergence_state.persona_learning_result = persona_result
+        except Exception as exc:
+            logger.warning("Persona learning failed: %s", exc)
+            # Don't fail the pipeline, just log
+
+        # Run evolution cycle (Phase E) - Toss style fast feedback
+        if progress_callback:
+            try:
+                progress_callback("evolution", "Running agent evolution analysis")
+            except Exception as exc:
+                logger.warning("Progress callback failed: %s", exc)
+
+        try:
+            evolution_result = _run_evolution_cycle(
+                convergence_state=convergence_state,
+                agent_definitions=agent_definitions or {},
+                personas=personas,
+                llm_command=llm_command,
+                llm_timeout=llm_timeout,
+            )
+            convergence_state.evolution_result = evolution_result
+        except Exception as exc:
+            logger.warning("Evolution cycle failed: %s", exc)
+            # Don't fail the pipeline, just log
+
     return convergence_state
 
 
@@ -1066,6 +1108,87 @@ def _run_trust_learning(
         command=llm_command,
         timeout=llm_timeout,
     )
+
+
+def _run_persona_learning(
+    convergence_state: ConvergencePipelineState,
+    agent_definitions: dict[str, dict],
+    personas: dict[str, AgentPersona],
+    llm_command: str | None,
+    llm_timeout: float,
+) -> PersonaLearningResult:
+    """Run persona learning based on convergence results.
+
+    Analyzes agent performance during deliberation and suggests persona adjustments:
+    - Weight rebalancing (impact, feasibility, novelty, etc.)
+    - Behavioral directive additions/removals
+    - Constraint modifications
+    """
+    from .persona_learning import compute_persona_adjustments
+
+    # Build current weights from personas
+    current_weights: dict[str, dict[str, float]] = {}
+    for agent_id, persona in personas.items():
+        if persona.weights:
+            current_weights[agent_id] = dict(persona.weights)
+
+    # Build current directives from personas
+    current_directives: dict[str, list[str]] = {}
+    for agent_id, persona in personas.items():
+        if persona.behavioral_directives:
+            current_directives[agent_id] = list(persona.behavioral_directives)
+
+    # Build current constraints from personas
+    current_constraints: dict[str, list[str]] = {}
+    for agent_id, persona in personas.items():
+        if persona.constraints:
+            current_constraints[agent_id] = list(persona.constraints)
+
+    # Build deliberation history from execution log
+    deliberation_history = [
+        entry for entry in convergence_state.execution_log
+        if entry.get("type") in ("chapter", "silo", "deliberation")
+    ]
+
+    return compute_persona_adjustments(
+        deliberation_history=deliberation_history,
+        final_scores=convergence_state.final_scores,
+        decisions=convergence_state.decisions,
+        agent_definitions=agent_definitions,
+        current_weights=current_weights,
+        current_directives=current_directives,
+        current_constraints=current_constraints,
+        command=llm_command,
+        timeout=llm_timeout,
+    )
+
+
+def _run_evolution_cycle(
+    convergence_state: ConvergencePipelineState,
+    agent_definitions: dict[str, dict],
+    personas: dict[str, AgentPersona],
+    llm_command: str | None,
+    llm_timeout: float,
+) -> EvolutionResult:
+    """Run agent evolution cycle based on convergence results.
+
+    Toss style: Fast feedback loop with auto-apply for small changes.
+    - Collect performance signals from this run
+    - Analyze patterns and propose evolution
+    - Auto-apply micro/small changes, flag large ones
+    """
+    from .agent_evolution import run_evolution_cycle
+
+    evolution_result, _ = run_evolution_cycle(
+        convergence_state=convergence_state,
+        agent_definitions=agent_definitions,
+        personas=personas,
+        historical_performance=None,  # Could pass from DB in production
+        command=llm_command,
+        timeout=llm_timeout,
+    )
+
+    return evolution_result
 
 
 def _to_convergence_state(

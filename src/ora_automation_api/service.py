@@ -1028,3 +1028,194 @@ def get_org_trust_map(org_id: str, db: Session | None = None) -> dict[str, dict[
     finally:
         if should_close:
             db.close()
+
+
+# ---------------------------------------------------------------------------
+# Persona Persistence (Phase C)
+# ---------------------------------------------------------------------------
+
+def persist_persona_adjustments(
+    org_id: str,
+    persona_learning_result: dict,
+    db: Session | None = None,
+    decay_factor: float = 0.9,
+) -> dict:
+    """Persist persona learning results to agent profiles in database.
+
+    Applies weight adjustments, directive changes, and constraint changes
+    to the agents in the specified organization.
+
+    Args:
+        org_id: Organization ID
+        persona_learning_result: PersonaLearningResult.to_dict() output
+        db: Optional DB session (creates new if None)
+        decay_factor: Dampening factor for weight adjustments (default 0.9)
+
+    Returns:
+        Summary dict with counts of updates applied
+    """
+    from .database import SessionLocal
+
+    should_close = db is None
+    if db is None:
+        db = SessionLocal()
+
+    try:
+        adjustments = persona_learning_result.get("adjustments", [])
+        if not adjustments:
+            return {"status": "no_adjustments", "applied": 0}
+
+        # Load all agents for this org
+        agents = db.query(OrganizationAgent).filter(
+            OrganizationAgent.org_id == org_id
+        ).all()
+        agent_map = {a.agent_id: a for a in agents}
+
+        applied_count = 0
+        weight_changes = 0
+        directive_adds = 0
+        directive_removes = 0
+        constraint_adds = 0
+        constraint_removes = 0
+
+        for adj in adjustments:
+            agent_id = adj.get("agent_id", "")
+            if agent_id not in agent_map:
+                continue
+
+            agent = agent_map[agent_id]
+            modified = False
+
+            # Apply weight adjustments
+            weight_adjustments = adj.get("weight_adjustments", [])
+            if weight_adjustments:
+                current_weights = dict(agent.weights or {})
+                for wa in weight_adjustments:
+                    weight_name = wa.get("weight_name", "")
+                    if not weight_name:
+                        continue
+                    delta = float(wa.get("delta", 0.0))
+                    confidence = float(wa.get("confidence", 0.5))
+
+                    current_value = current_weights.get(weight_name, 0.2)
+                    effective_delta = delta * confidence * decay_factor
+                    new_value = max(0.0, min(1.0, current_value + effective_delta))
+                    new_value = round(new_value, 4)
+
+                    if abs(new_value - current_value) > 0.001:
+                        current_weights[weight_name] = new_value
+                        weight_changes += 1
+                        modified = True
+
+                if modified:
+                    agent.weights = current_weights
+
+            # Apply directive additions
+            add_directives = adj.get("add_directives", [])
+            if add_directives:
+                current_directives = list(agent.behavioral_directives or [])
+                for directive in add_directives:
+                    if directive and directive not in current_directives:
+                        current_directives.append(directive)
+                        directive_adds += 1
+                        modified = True
+                agent.behavioral_directives = current_directives
+
+            # Apply directive removals
+            remove_directives = adj.get("remove_directives", [])
+            if remove_directives:
+                current_directives = list(agent.behavioral_directives or [])
+                for directive in remove_directives:
+                    if directive in current_directives:
+                        current_directives.remove(directive)
+                        directive_removes += 1
+                        modified = True
+                agent.behavioral_directives = current_directives
+
+            # Apply constraint additions
+            add_constraints = adj.get("add_constraints", [])
+            if add_constraints:
+                current_constraints = list(agent.constraints or [])
+                for constraint in add_constraints:
+                    if constraint and constraint not in current_constraints:
+                        current_constraints.append(constraint)
+                        constraint_adds += 1
+                        modified = True
+                agent.constraints = current_constraints
+
+            # Apply constraint removals
+            remove_constraints = adj.get("remove_constraints", [])
+            if remove_constraints:
+                current_constraints = list(agent.constraints or [])
+                for constraint in remove_constraints:
+                    if constraint in current_constraints:
+                        current_constraints.remove(constraint)
+                        constraint_removes += 1
+                        modified = True
+                agent.constraints = current_constraints
+
+            if modified:
+                db.add(agent)
+                applied_count += 1
+
+        db.commit()
+        return {
+            "status": "ok",
+            "applied": applied_count,
+            "total_adjustments": len(adjustments),
+            "details": {
+                "weight_changes": weight_changes,
+                "directive_adds": directive_adds,
+                "directive_removes": directive_removes,
+                "constraint_adds": constraint_adds,
+                "constraint_removes": constraint_removes,
+            },
+        }
+
+    except Exception as exc:
+        logger.exception("Failed to persist persona adjustments: %s", exc)
+        db.rollback()
+        return {"status": "error", "error": str(exc)}
+    finally:
+        if should_close:
+            db.close()
+
+
+def get_org_agent_personas(org_id: str, db: Session | None = None) -> dict[str, dict]:
+    """Get all agent persona data for an organization.
+
+    Args:
+        org_id: Organization ID
+        db: Optional DB session
+
+    Returns:
+        {agent_id: {weights, directives, constraints, ...}}
+    """
+    from .database import SessionLocal
+
+    should_close = db is None
+    if db is None:
+        db = SessionLocal()
+
+    try:
+        agents = db.query(OrganizationAgent).filter(
+            OrganizationAgent.org_id == org_id,
+            OrganizationAgent.enabled == True,
+        ).all()
+
+        personas: dict[str, dict] = {}
+        for agent in agents:
+            personas[agent.agent_id] = {
+                "weights": dict(agent.weights or {}),
+                "behavioral_directives": list(agent.behavioral_directives or []),
+                "constraints": list(agent.constraints or []),
+                "trust_map": dict(agent.trust_map or {}),
+                "tier": agent.tier,
+                "role": agent.role,
+                "domain": agent.domain,
+                "team": agent.team,
+            }
+        return personas
+    finally:
+        if should_close:
+            db.close()
