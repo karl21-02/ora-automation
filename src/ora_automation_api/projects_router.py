@@ -13,11 +13,13 @@ from .database import get_db
 from .models import GithubRepo, Project
 from .project_service import sync_local_workspace
 from .schemas import (
+    AnalysisHistoryItem,
     ConfigFile,
     LocalScanResult,
     ProjectConfigResponse,
     ProjectCreate,
     ProjectEnvResponse,
+    ProjectHistoryResponse,
     ProjectList,
     ProjectPrepareResponse,
     ProjectRead,
@@ -341,3 +343,53 @@ def get_project_config(
     return ProjectConfigResponse(
         files=[ConfigFile(**c) for c in configs]
     )
+
+
+# ── GET /projects/{id}/history ────────────────────────────────────────────
+
+
+@router.get("/{project_id}/history", response_model=ProjectHistoryResponse)
+def get_project_history(
+    project_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> ProjectHistoryResponse:
+    """Get analysis history for a project.
+
+    Returns orchestration runs associated with this project.
+    """
+    from .models import OrchestrationRun
+
+    project = db.scalar(select(Project).where(Project.id == project_id))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Query runs for this project
+    query = (
+        select(OrchestrationRun)
+        .where(OrchestrationRun.project_id == project_id)
+        .order_by(OrchestrationRun.created_at.desc())
+    )
+
+    # Get total count
+    count_query = select(func.count()).select_from(query.subquery())
+    total = db.scalar(count_query) or 0
+
+    # Apply pagination
+    query = query.offset(offset).limit(limit)
+    runs = db.scalars(query).all()
+
+    items = [
+        AnalysisHistoryItem(
+            id=run.id,
+            run_type=run.target,
+            status=run.status,
+            started_at=run.started_at,
+            completed_at=run.finished_at,
+            user_prompt=run.user_prompt[:200] if run.user_prompt else "",
+        )
+        for run in runs
+    ]
+
+    return ProjectHistoryResponse(items=items, total=total)

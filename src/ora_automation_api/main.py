@@ -240,6 +240,8 @@ def _run_ddl_migrations() -> None:
         )""",
         # Add scan_path_id to projects table
         "ALTER TABLE projects ADD COLUMN IF NOT EXISTS scan_path_id VARCHAR(36) REFERENCES scan_paths(id) ON DELETE SET NULL",
+        # Add project_id to orchestration_runs for history tracking
+        "ALTER TABLE orchestration_runs ADD COLUMN IF NOT EXISTS project_id VARCHAR(36) REFERENCES projects(id) ON DELETE SET NULL",
     ]
     with engine.begin() as conn:
         for stmt in statements:

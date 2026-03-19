@@ -22,6 +22,12 @@ class OrchestrationRun(Base):
         nullable=True,
         index=True,
     )
+    project_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     command: Mapped[str] = mapped_column(Text, nullable=False)
     rollback_command: Mapped[str | None] = mapped_column(Text, nullable=True)
     env: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

@@ -703,3 +703,19 @@ class ConfigFile(BaseModel):
 
 class ProjectConfigResponse(BaseModel):
     files: list[ConfigFile] = Field(default_factory=list)
+
+
+class AnalysisHistoryItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    run_type: str  # target field (e.g., "rd_analysis", "run-cycle")
+    status: str
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    user_prompt: str = ""
+
+
+class ProjectHistoryResponse(BaseModel):
+    items: list[AnalysisHistoryItem] = Field(default_factory=list)
+    total: int
