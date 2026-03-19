@@ -685,3 +685,10 @@ class ProjectPrepareResponse(BaseModel):
     project_id: str
     local_path: str
     cloned: bool = False
+
+
+class ProjectEnvResponse(BaseModel):
+    has_env: bool
+    has_env_example: bool
+    env_content: dict[str, str] = Field(default_factory=dict)
+    env_example_content: dict[str, str] | None = None

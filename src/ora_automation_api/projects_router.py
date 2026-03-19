@@ -15,6 +15,7 @@ from .project_service import sync_local_workspace
 from .schemas import (
     LocalScanResult,
     ProjectCreate,
+    ProjectEnvResponse,
     ProjectList,
     ProjectPrepareResponse,
     ProjectRead,
@@ -268,4 +269,42 @@ async def prepare_project(
         project_id=project_id,
         local_path=str(clone_path),
         cloned=not already_cloned,
+    )
+
+
+# ── GET /projects/{id}/env ────────────────────────────────────────────
+
+
+@router.get("/{project_id}/env", response_model=ProjectEnvResponse)
+def get_project_env(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ProjectEnvResponse:
+    """Get project .env file contents (sensitive values masked).
+
+    Returns:
+        - has_env: whether .env file exists
+        - has_env_example: whether .env.example exists
+        - env_content: parsed .env with sensitive values masked
+        - env_example_content: parsed .env.example (unmasked)
+    """
+    from .env_reader import read_project_env
+
+    project = db.scalar(select(Project).where(Project.id == project_id))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if not project.local_path:
+        raise HTTPException(
+            status_code=400,
+            detail="Project has no local path. Use /prepare endpoint first.",
+        )
+
+    env_data = read_project_env(project.local_path)
+
+    return ProjectEnvResponse(
+        has_env=env_data["has_env"],
+        has_env_example=env_data["has_env_example"],
+        env_content=env_data["env_content"],
+        env_example_content=env_data["env_example_content"],
     )
