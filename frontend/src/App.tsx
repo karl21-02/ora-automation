@@ -256,6 +256,10 @@ export default function App() {
     }
   }, [])
 
+  const handleMobileClose = useCallback(() => {
+    if (isMobile) setMobileOpen(false)
+  }, [isMobile])
+
   if (!dbReady || !activeConv) {
     return (
       <div style={{
@@ -271,10 +275,6 @@ export default function App() {
       </div>
     )
   }
-
-  const handleMobileClose = useCallback(() => {
-    if (isMobile) setMobileOpen(false)
-  }, [isMobile])
 
   return (
     <div style={{
