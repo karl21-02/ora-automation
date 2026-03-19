@@ -102,6 +102,7 @@ export async function createRun(
   userPrompt: string,
   orgId?: string | null,
   guestAgentIds?: string[],
+  projectId?: string | null,
 ): Promise<OrchestrationRun> {
   return request<OrchestrationRun>(`${BASE}/orchestrations`, {
     method: 'POST',
@@ -111,7 +112,29 @@ export async function createRun(
       target: plan.target,
       env: plan.env,
       org_id: orgId ?? undefined,
+      project_id: projectId ?? undefined,
       guest_agent_ids: guestAgentIds && guestAgentIds.length > 0 ? guestAgentIds : undefined,
+    }),
+  })
+}
+
+export async function createProjectRun(
+  projectId: string,
+  target: string = 'run-cycle',
+  focus?: string,
+): Promise<OrchestrationRun> {
+  const env: Record<string, string> = {}
+  if (focus) {
+    env['FOCUS'] = focus
+  }
+  return request<OrchestrationRun>(`${BASE}/orchestrations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      user_prompt: `Analyze project ${projectId}`,
+      target,
+      env,
+      project_id: projectId,
     }),
   })
 }

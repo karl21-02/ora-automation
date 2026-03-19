@@ -1,6 +1,6 @@
-import { Clock, Code, FileCode, FileText, Key, Settings, X } from 'lucide-react'
+import { Clock, Code, FileCode, FileText, Key, Play, Settings, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { getProjectConfig, getProjectEnv, getProjectHistory, getUnifiedProject } from '../lib/api'
+import { createProjectRun, getProjectConfig, getProjectEnv, getProjectHistory, getUnifiedProject } from '../lib/api'
 import type { AnalysisHistoryItem, ConfigFile, ProjectConfigResponse, ProjectEnvResponse, UnifiedProject } from '../types'
 
 type TabId = 'overview' | 'env' | 'config' | 'history'
@@ -16,6 +16,8 @@ export default function ProjectDetail({ projectId, onClose, embedded = false }: 
   const [activeTab, setActiveTab] = useState<TabId>('overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [runningAnalysis, setRunningAnalysis] = useState(false)
+  const [lastRunId, setLastRunId] = useState<string | null>(null)
 
   // Tab-specific data
   const [envData, setEnvData] = useState<ProjectEnvResponse | null>(null)
@@ -61,6 +63,24 @@ export default function ProjectDetail({ projectId, onClose, embedded = false }: 
     loadTabData()
   }, [activeTab, projectId, project?.local_path, envData, configData, historyData.length])
 
+  const handleRunAnalysis = async () => {
+    if (runningAnalysis) return
+    setRunningAnalysis(true)
+    setLastRunId(null)
+    try {
+      const run = await createProjectRun(projectId)
+      setLastRunId(run.id)
+      // Reload history to show new run
+      const data = await getProjectHistory(projectId)
+      setHistoryData(data.items)
+      setActiveTab('history')
+    } catch (e) {
+      console.error('Failed to start analysis:', e)
+    } finally {
+      setRunningAnalysis(false)
+    }
+  }
+
   if (loading) {
     return (
       <div style={styles.container}>
@@ -98,14 +118,49 @@ export default function ProjectDetail({ projectId, onClose, embedded = false }: 
     <div style={containerStyle}>
       {/* Header */}
       <div style={styles.header}>
-        <div>
+        <div style={{ flex: 1 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{project.name}</h2>
           <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
             {project.local_path || 'No local path'}
           </div>
         </div>
-        {!embedded && <button onClick={onClose} style={styles.closeBtn}><X size={18} /></button>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            onClick={handleRunAnalysis}
+            disabled={runningAnalysis || !project.local_path}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              border: 'none',
+              borderRadius: 6,
+              background: runningAnalysis ? '#9ca3af' : '#3b82f6',
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: runningAnalysis || !project.local_path ? 'not-allowed' : 'pointer',
+              opacity: !project.local_path ? 0.5 : 1,
+            }}
+            title={!project.local_path ? 'No local path available' : 'Run R&D analysis'}
+          >
+            <Play size={14} />
+            {runningAnalysis ? 'Starting...' : 'Analyze'}
+          </button>
+          {!embedded && <button onClick={onClose} style={styles.closeBtn}><X size={18} /></button>}
+        </div>
       </div>
+      {lastRunId && (
+        <div style={{
+          padding: '8px 16px',
+          background: '#dcfce7',
+          borderBottom: '1px solid #bbf7d0',
+          fontSize: 13,
+          color: '#166534',
+        }}>
+          Analysis started! Run ID: {lastRunId.slice(0, 8)}...
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={styles.tabs}>
