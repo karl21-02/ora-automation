@@ -1,6 +1,7 @@
 import { Menu } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ChatWindow from './components/ChatWindow'
+import ControlCenter from './components/ControlCenter'
 import NewChatModal from './components/NewChatModal'
 import OrgPanel from './components/OrgPanel'
 import ReportViewer from './components/ReportViewer'
@@ -339,6 +340,9 @@ export default function App() {
       )}
       {activeMenu === 'orgs' && (
         <OrgPanel onOrgsChanged={refreshOrgs} />
+      )}
+      {activeMenu === 'control' && (
+        <ControlCenter />
       )}
       {activeMenu === 'scheduler' && (
         <SchedulerPanel />

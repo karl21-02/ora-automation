@@ -8,9 +8,10 @@ type TabId = 'overview' | 'env' | 'config' | 'history'
 interface Props {
   projectId: string
   onClose: () => void
+  embedded?: boolean
 }
 
-export default function ProjectDetail({ projectId, onClose }: Props) {
+export default function ProjectDetail({ projectId, onClose, embedded = false }: Props) {
   const [project, setProject] = useState<UnifiedProject | null>(null)
   const [activeTab, setActiveTab] = useState<TabId>('overview')
   const [loading, setLoading] = useState(true)
@@ -89,8 +90,12 @@ export default function ProjectDetail({ projectId, onClose }: Props) {
     { id: 'history', label: 'History', icon: <Clock size={14} /> },
   ]
 
+  const containerStyle = embedded
+    ? { ...styles.container, position: 'relative' as const, width: '100%', boxShadow: 'none', borderLeft: 'none' }
+    : styles.container
+
   return (
-    <div style={styles.container}>
+    <div style={containerStyle}>
       {/* Header */}
       <div style={styles.header}>
         <div>
@@ -99,7 +104,7 @@ export default function ProjectDetail({ projectId, onClose }: Props) {
             {project.local_path || 'No local path'}
           </div>
         </div>
-        <button onClick={onClose} style={styles.closeBtn}><X size={18} /></button>
+        {!embedded && <button onClick={onClose} style={styles.closeBtn}><X size={18} /></button>}
       </div>
 
       {/* Tabs */}
