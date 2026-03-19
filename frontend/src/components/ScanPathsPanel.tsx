@@ -1,4 +1,4 @@
-import { FolderPlus, FolderSync, MoreVertical, Play, Plus, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react'
+import { FolderPlus, FolderSync, Play, Plus, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import {
   createScanPath,

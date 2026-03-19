@@ -8,7 +8,6 @@ import {
 } from '../lib/api'
 import type { GithubInstallation, ScanPath, UnifiedProject } from '../types'
 import ProjectDetail from './ProjectDetail'
-import ScanPathsPanel from './ScanPathsPanel'
 
 type SourceFilter = 'all' | 'local' | 'github' | 'github_only'
 
@@ -32,11 +31,11 @@ export default function ControlCenter() {
           search: search || undefined,
           limit: 200,
         }),
-        listGithubInstallations().catch(() => ({ items: [] })),
+        listGithubInstallations().catch(() => [] as GithubInstallation[]),
       ])
       setScanPaths(pathsRes.items)
       setProjects(projectsRes.items)
-      setGithubInstalls(installsRes.items)
+      setGithubInstalls(installsRes)
     } catch {
       // Failed to load
     } finally {

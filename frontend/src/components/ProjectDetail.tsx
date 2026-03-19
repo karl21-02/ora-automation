@@ -1,7 +1,7 @@
 import { Clock, Code, FileCode, FileText, Key, Play, Settings, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { createProjectRun, getProjectConfig, getProjectEnv, getProjectHistory, getUnifiedProject } from '../lib/api'
-import type { AnalysisHistoryItem, ConfigFile, ProjectConfigResponse, ProjectEnvResponse, UnifiedProject } from '../types'
+import type { AnalysisHistoryItem, ProjectConfigResponse, ProjectEnvResponse, UnifiedProject } from '../types'
 
 type TabId = 'overview' | 'env' | 'config' | 'history'
 
@@ -371,15 +371,10 @@ function ConfigTab({ data, hasLocalPath }: { data: ProjectConfigResponse | null;
 // ── History Tab ────────────────────────────────────────────────────
 
 function HistoryTab({ items, onRefresh }: { items: AnalysisHistoryItem[]; onRefresh?: () => void }) {
-  const [pollingIds, setPollingIds] = useState<Set<string>>(new Set())
-
   // Poll for running items
   useEffect(() => {
     const runningItems = items.filter((i) => i.status === 'running' || i.status === 'queued')
     if (runningItems.length === 0) return
-
-    const newPollingIds = new Set(runningItems.map((i) => i.id))
-    setPollingIds(newPollingIds)
 
     const interval = setInterval(() => {
       onRefresh?.()
@@ -457,9 +452,9 @@ function HistoryTab({ items, onRefresh }: { items: AnalysisHistoryItem[]; onRefr
 
             <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#9ca3af' }}>
               <span>ID: {item.id.slice(0, 8)}</span>
-              {item.finished_at && (
+              {item.completed_at && (
                 <span>
-                  Duration: {Math.round((new Date(item.finished_at).getTime() - new Date(item.started_at!).getTime()) / 1000)}s
+                  Duration: {Math.round((new Date(item.completed_at).getTime() - new Date(item.started_at!).getTime()) / 1000)}s
                 </span>
               )}
             </div>
