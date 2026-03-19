@@ -63,6 +63,15 @@ export default function ProjectDetail({ projectId, onClose, embedded = false }: 
     loadTabData()
   }, [activeTab, projectId, project?.local_path, envData, configData, historyData.length])
 
+  const refreshHistory = useCallback(async () => {
+    try {
+      const data = await getProjectHistory(projectId)
+      setHistoryData(data.items)
+    } catch {
+      // Failed to refresh
+    }
+  }, [projectId])
+
   const handleRunAnalysis = async () => {
     if (runningAnalysis) return
     setRunningAnalysis(true)
@@ -71,8 +80,7 @@ export default function ProjectDetail({ projectId, onClose, embedded = false }: 
       const run = await createProjectRun(projectId)
       setLastRunId(run.id)
       // Reload history to show new run
-      const data = await getProjectHistory(projectId)
-      setHistoryData(data.items)
+      await refreshHistory()
       setActiveTab('history')
     } catch (e) {
       console.error('Failed to start analysis:', e)
@@ -185,7 +193,7 @@ export default function ProjectDetail({ projectId, onClose, embedded = false }: 
         {activeTab === 'overview' && <OverviewTab project={project} />}
         {activeTab === 'env' && <EnvTab data={envData} hasLocalPath={!!project.local_path} />}
         {activeTab === 'config' && <ConfigTab data={configData} hasLocalPath={!!project.local_path} />}
-        {activeTab === 'history' && <HistoryTab items={historyData} />}
+        {activeTab === 'history' && <HistoryTab items={historyData} onRefresh={refreshHistory} />}
       </div>
     </div>
   )
@@ -362,52 +370,109 @@ function ConfigTab({ data, hasLocalPath }: { data: ProjectConfigResponse | null;
 
 // ── History Tab ────────────────────────────────────────────────────
 
-function HistoryTab({ items }: { items: AnalysisHistoryItem[] }) {
+function HistoryTab({ items, onRefresh }: { items: AnalysisHistoryItem[]; onRefresh?: () => void }) {
+  const [pollingIds, setPollingIds] = useState<Set<string>>(new Set())
+
+  // Poll for running items
+  useEffect(() => {
+    const runningItems = items.filter((i) => i.status === 'running' || i.status === 'queued')
+    if (runningItems.length === 0) return
+
+    const newPollingIds = new Set(runningItems.map((i) => i.id))
+    setPollingIds(newPollingIds)
+
+    const interval = setInterval(() => {
+      onRefresh?.()
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [items, onRefresh])
+
   if (items.length === 0) {
     return <EmptyState message="No analysis history yet" />
   }
 
-  const statusColors: Record<string, string> = {
-    completed: '#22c55e',
-    running: '#3b82f6',
-    error: '#ef4444',
-    queued: '#f59e0b',
+  const statusConfig: Record<string, { color: string; bg: string; label: string }> = {
+    completed: { color: '#166534', bg: '#dcfce7', label: 'Completed' },
+    running: { color: '#1e40af', bg: '#dbeafe', label: 'Running' },
+    error: { color: '#991b1b', bg: '#fee2e2', label: 'Error' },
+    failed: { color: '#991b1b', bg: '#fee2e2', label: 'Failed' },
+    queued: { color: '#92400e', bg: '#fef3c7', label: 'Queued' },
+    retry: { color: '#92400e', bg: '#fef3c7', label: 'Retry' },
+    cancelled: { color: '#6b7280', bg: '#f3f4f6', label: 'Cancelled' },
+    dlq: { color: '#991b1b', bg: '#fee2e2', label: 'DLQ' },
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {items.map((item) => (
-        <div
-          key={item.id}
-          style={{
-            padding: '10px 12px',
-            border: '1px solid #e5e7eb',
-            borderRadius: 6,
-            fontSize: 13,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <span style={{
-              padding: '2px 6px',
-              borderRadius: 4,
-              fontSize: 11,
-              background: statusColors[item.status] || '#9ca3af',
-              color: '#fff',
-            }}>
-              {item.status}
-            </span>
-            <span style={{ fontWeight: 500 }}>{item.run_type}</span>
-            <span style={{ marginLeft: 'auto', fontSize: 11, color: '#9ca3af' }}>
-              {item.started_at ? new Date(item.started_at).toLocaleString() : '—'}
-            </span>
-          </div>
-          {item.user_prompt && (
-            <div style={{ color: '#6b7280', fontSize: 12 }}>
-              {item.user_prompt}
+      {items.map((item) => {
+        const status = statusConfig[item.status] || { color: '#6b7280', bg: '#f3f4f6', label: item.status }
+        const isActive = item.status === 'running' || item.status === 'queued'
+
+        return (
+          <div
+            key={item.id}
+            style={{
+              padding: '12px 14px',
+              border: `1px solid ${isActive ? '#93c5fd' : '#e5e7eb'}`,
+              borderRadius: 8,
+              fontSize: 13,
+              backgroundColor: isActive ? '#eff6ff' : '#fff',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 8px',
+                borderRadius: 4,
+                fontSize: 11,
+                fontWeight: 500,
+                background: status.bg,
+                color: status.color,
+              }}>
+                {isActive && (
+                  <span style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    backgroundColor: status.color,
+                    animation: 'pulse 1.5s infinite',
+                  }} />
+                )}
+                {status.label}
+              </span>
+              <span style={{ fontWeight: 500, color: '#374151' }}>{item.run_type}</span>
+              <span style={{ marginLeft: 'auto', fontSize: 11, color: '#9ca3af' }}>
+                {item.started_at ? new Date(item.started_at).toLocaleString() : '—'}
+              </span>
             </div>
-          )}
-        </div>
-      ))}
+
+            {item.user_prompt && (
+              <div style={{ color: '#6b7280', fontSize: 12, marginBottom: 4 }}>
+                {item.user_prompt.length > 100 ? item.user_prompt.slice(0, 100) + '...' : item.user_prompt}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#9ca3af' }}>
+              <span>ID: {item.id.slice(0, 8)}</span>
+              {item.finished_at && (
+                <span>
+                  Duration: {Math.round((new Date(item.finished_at).getTime() - new Date(item.started_at!).getTime()) / 1000)}s
+                </span>
+              )}
+            </div>
+          </div>
+        )
+      })}
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      `}</style>
     </div>
   )
 }
