@@ -167,7 +167,7 @@ resource "google_compute_instance" "mimir_backend" {
     # Create production .env file
     cat > .env << ENVFILE
 # Database
-DATABASE_URL=postgresql://mimir:${var.db_password}@postgres:5432/mimir_db
+DATABASE_URL=postgresql+psycopg://mimir:${var.db_password}@db:5432/mimir_db
 POSTGRES_USER=mimir
 POSTGRES_PASSWORD=${var.db_password}
 POSTGRES_DB=mimir_db
