@@ -1,5 +1,6 @@
 import GitHubSettings from './GitHubSettings'
 import ProjectListPanel from './ProjectListPanel'
+import ScanPathsPanel from './ScanPathsPanel'
 import { useTheme, type Theme } from '../lib/hooks/useTheme'
 
 export default function SettingsPanel() {
@@ -8,6 +9,10 @@ export default function SettingsPanel() {
   return (
     <div className="settings-panel">
       <h2 className="settings-title">Settings</h2>
+
+      <ScanPathsPanel />
+
+      <div className="settings-divider" />
 
       <GitHubSettings />
 

@@ -5,6 +5,7 @@ import {
   scanLocalProjects,
   updateUnifiedProject,
 } from '../lib/api'
+import ProjectDetail from './ProjectDetail'
 
 const styles = {
   container: {
@@ -183,6 +184,7 @@ export default function ProjectListPanel() {
   const [scanning, setScanning] = useState(false)
   const [scanResult, setScanResult] = useState<LocalScanResult | null>(null)
   const [loading, setLoading] = useState(true)
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
 
   useEffect(() => {
     loadProjects()
@@ -296,7 +298,14 @@ export default function ProjectListPanel() {
           {projects.map(project => {
             const sourceType = sourceTypeLabels[project.source_type] || sourceTypeLabels.local
             return (
-              <div key={project.id} style={styles.item}>
+              <div
+                key={project.id}
+                style={{
+                  ...styles.item,
+                  cursor: 'pointer',
+                }}
+                onClick={() => setSelectedProjectId(project.id)}
+              >
                 <span style={styles.sourceIcon}>{sourceType.icon}</span>
                 <div style={styles.info}>
                   <p style={styles.name}>{project.name}</p>
@@ -317,7 +326,10 @@ export default function ProjectListPanel() {
                     ...styles.toggle,
                     ...(project.enabled ? styles.toggleOn : {}),
                   }}
-                  onClick={() => handleToggleEnabled(project)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleToggleEnabled(project)
+                  }}
                   title={project.enabled ? 'Enabled for analysis' : 'Disabled'}
                 >
                   <div style={{
@@ -329,6 +341,14 @@ export default function ProjectListPanel() {
             )
           })}
         </div>
+      )}
+
+      {/* Project Detail Slide-in */}
+      {selectedProjectId && (
+        <ProjectDetail
+          projectId={selectedProjectId}
+          onClose={() => setSelectedProjectId(null)}
+        />
       )}
     </div>
   )
