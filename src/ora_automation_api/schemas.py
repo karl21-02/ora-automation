@@ -692,3 +692,14 @@ class ProjectEnvResponse(BaseModel):
     has_env_example: bool
     env_content: dict[str, str] = Field(default_factory=dict)
     env_example_content: dict[str, str] | None = None
+
+
+class ConfigFile(BaseModel):
+    name: str
+    path: str
+    type: str  # "json", "toml", "yaml", "text"
+    content: dict | list | str
+
+
+class ProjectConfigResponse(BaseModel):
+    files: list[ConfigFile] = Field(default_factory=list)

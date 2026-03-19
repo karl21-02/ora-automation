@@ -13,7 +13,9 @@ from .database import get_db
 from .models import GithubRepo, Project
 from .project_service import sync_local_workspace
 from .schemas import (
+    ConfigFile,
     LocalScanResult,
+    ProjectConfigResponse,
     ProjectCreate,
     ProjectEnvResponse,
     ProjectList,
@@ -307,4 +309,35 @@ def get_project_env(
         has_env_example=env_data["has_env_example"],
         env_content=env_data["env_content"],
         env_example_content=env_data["env_example_content"],
+    )
+
+
+# ── GET /projects/{id}/config ────────────────────────────────────────────
+
+
+@router.get("/{project_id}/config", response_model=ProjectConfigResponse)
+def get_project_config(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ProjectConfigResponse:
+    """Get project configuration files.
+
+    Reads common config files like package.json, pyproject.toml, etc.
+    """
+    from .config_reader import read_project_configs
+
+    project = db.scalar(select(Project).where(Project.id == project_id))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if not project.local_path:
+        raise HTTPException(
+            status_code=400,
+            detail="Project has no local path. Use /prepare endpoint first.",
+        )
+
+    configs = read_project_configs(project.local_path)
+
+    return ProjectConfigResponse(
+        files=[ConfigFile(**c) for c in configs]
     )
