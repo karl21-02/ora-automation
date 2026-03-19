@@ -16,8 +16,11 @@ __pycache__/
 !.env.example
 *.pem
 *.key
+*.p12
 google-service-account.json
+*-service-account.json
 credentials.json
+secrets/
 
 # IDE
 .idea/
@@ -44,3 +47,21 @@ htmlcov/
 
 # Research output
 research_reports/
+
+# Logs
+*.log
+logs/
+
+# Local clones
+.ora-clones/
+
+# Editor
+*.sublime-*
+.project
+.classpath
+
+# Misc
+*.bak
+*.tmp
+.mypy_cache/
+.ruff_cache/

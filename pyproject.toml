@@ -1,9 +1,24 @@
 [project]
-name = "ora-rd-orchestrator"
-version = "0.1.0"
-description = "Offline project-aware R&D research orchestrator with multi-agent scoring."
+name = "ora-automation"
+version = "1.0.0"
+description = "Multi-agent R&D research orchestrator with scoring, debate, and consensus."
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.10"
+authors = [
+    {name = "Ora Contributors"}
+]
+keywords = ["multi-agent", "orchestrator", "research", "llm", "gemini", "automation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "fastapi>=0.115.0,<1.0.0",
     "uvicorn[standard]>=0.30.0,<1.0.0",
@@ -31,6 +46,12 @@ ora-automation-chatbot = "ora_rd_orchestrator.chatbot:main"
 [project.optional-dependencies]
 web = ["scrapling>=0.4.0"]
 dev = ["pytest>=7.4.0", "pytest-cov>=4.1.0", "httpx>=0.24.0", "pytest-asyncio>=0.23.0"]
+
+[project.urls]
+Homepage = "https://github.com/karl21-02/ora-automation"
+Documentation = "https://github.com/karl21-02/ora-automation#readme"
+Repository = "https://github.com/karl21-02/ora-automation.git"
+Issues = "https://github.com/karl21-02/ora-automation/issues"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
