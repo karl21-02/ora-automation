@@ -543,6 +543,48 @@ class OrgChapterRead(BaseModel):
     updated_at: datetime
 
 
+# ── Scan Paths ─────────────────────────────────────────────────────
+
+
+class ScanPathCreate(BaseModel):
+    path: str = Field(..., min_length=1, max_length=500)
+    name: str | None = Field(default=None, max_length=100)
+    recursive: bool = False
+
+
+class ScanPathUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=100)
+    enabled: bool | None = None
+    recursive: bool | None = None
+
+
+class ScanPathRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    path: str
+    name: str | None = None
+    enabled: bool
+    recursive: bool
+    last_scanned_at: datetime | None = None
+    project_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ScanPathList(BaseModel):
+    items: list[ScanPathRead]
+    total: int
+
+
+class ScanResult(BaseModel):
+    scan_path_id: str
+    projects_found: int
+    projects_created: int
+    projects_updated: int
+    duration_ms: int
+
+
 # ── GitHub Integration ─────────────────────────────────────────────
 
 

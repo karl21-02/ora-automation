@@ -224,6 +224,20 @@ def _run_ddl_migrations() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
+        # Scan paths for local workspace management
+        """CREATE TABLE IF NOT EXISTS scan_paths (
+            id VARCHAR(36) PRIMARY KEY,
+            path VARCHAR(500) NOT NULL UNIQUE,
+            name VARCHAR(100),
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            recursive BOOLEAN NOT NULL DEFAULT FALSE,
+            last_scanned_at TIMESTAMPTZ,
+            project_count INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        # Add scan_path_id to projects table
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS scan_path_id VARCHAR(36) REFERENCES scan_paths(id) ON DELETE SET NULL",
     ]
     with engine.begin() as conn:
         for stmt in statements:
