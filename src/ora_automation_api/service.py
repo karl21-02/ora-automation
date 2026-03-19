@@ -301,6 +301,12 @@ def create_run(db: Session, payload: OrchestrationRunCreate) -> tuple[Orchestrat
 
     run_id = str(uuid4())
     max_attempts = payload.max_attempts or settings.default_max_attempts
+    project_id = getattr(payload, "project_id", None)
+
+    # If project_id is provided, also store it in env for pipeline access
+    if project_id:
+        env["PROJECT_ID"] = project_id
+
     run = OrchestrationRun(
         id=run_id,
         idempotency_key=idempotency_key,
@@ -308,6 +314,7 @@ def create_run(db: Session, payload: OrchestrationRunCreate) -> tuple[Orchestrat
         target=target,
         agent_role=agent_role,
         org_id=getattr(payload, "org_id", None),
+        project_id=project_id,
         guest_agent_ids=getattr(payload, "guest_agent_ids", []) or [],
         command=command,
         rollback_command=rollback_command,

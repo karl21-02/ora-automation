@@ -69,6 +69,7 @@ class OrchestrationRunCreate(BaseModel):
     rollback_command: str | None = Field(default=None, min_length=1, max_length=4096)
     decision: DecisionCreate | None = None
     org_id: str | None = Field(default=None, min_length=1, max_length=36)
+    project_id: str | None = Field(default=None, min_length=1, max_length=36)
     guest_agent_ids: list[str] = Field(
         default_factory=list,
         description="Guest agents from other orgs. Format: 'org_id:agent_id'",
@@ -84,6 +85,7 @@ class OrchestrationRunRead(BaseModel):
     target: str
     agent_role: str
     org_id: str | None = None
+    project_id: str | None = None
     command: str
     rollback_command: str | None
     env: dict
