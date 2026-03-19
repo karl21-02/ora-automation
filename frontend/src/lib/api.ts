@@ -1,6 +1,10 @@
 import type { ChatChoice, ChatPlan, ChatResponse, GithubInstallation, GithubRepo, LocalScanResult, OrgAgent, OrgChapter, OrgRecommendOption, OrgSilo, OrchestrationEvent, OrchestrationRun, Organization, OrganizationDetail, ProjectConfigResponse, ProjectEnvResponse, ProjectHistoryResponse, ProjectInfo, ProjectList, ProjectPrepareResponse, ReportListItem, ScanPath, ScanPathCreate, ScanPathList, ScanPathUpdate, ScanResult, ScheduledJob, ScheduledJobCreate, UnifiedProject } from '../types'
 
-const BASE = '/api/v1'
+// Use GCP server in production, localhost in development
+const API_HOST = import.meta.env.PROD
+  ? 'http://34.22.70.164:8000'
+  : ''
+const BASE = `${API_HOST}/api/v1`
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
