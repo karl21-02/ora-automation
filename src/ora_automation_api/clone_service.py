@@ -6,6 +6,7 @@ Provides shallow clone and pull functionality for analysis preparation.
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import logging
 import shutil
 import time
@@ -14,6 +15,38 @@ from pathlib import Path
 from .config import settings
 
 logger = logging.getLogger(__name__)
+
+# Lock file directory for clone operations
+_LOCK_DIR: Path | None = None
+
+
+def _get_lock_dir() -> Path:
+    """Get or create the lock directory."""
+    global _LOCK_DIR
+    if _LOCK_DIR is None:
+        _LOCK_DIR = settings.github_clone_base_dir / ".locks"
+        _LOCK_DIR.mkdir(parents=True, exist_ok=True)
+    return _LOCK_DIR
+
+
+class CloneLock:
+    """File-based lock for clone operations to prevent race conditions."""
+
+    def __init__(self, full_name: str):
+        self.lock_path = _get_lock_dir() / f"{full_name.replace('/', '_')}.lock"
+        self.lock_file = None
+
+    def __enter__(self):
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_file = open(self.lock_path, "w")
+        fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.lock_file:
+            fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
+            self.lock_file.close()
+        return False
 
 
 async def shallow_clone(clone_url: str, target_path: Path, branch: str = "main") -> None:
@@ -96,6 +129,9 @@ async def ensure_local_clone(
 ) -> Path:
     """Ensure a repository is cloned locally, clone if needed.
 
+    Uses file locking to prevent race conditions when multiple requests
+    try to clone the same repository simultaneously.
+
     Args:
         clone_url: Git clone URL.
         full_name: Repository full name (owner/repo).
@@ -110,12 +146,31 @@ async def ensure_local_clone(
     """
     clone_dir = settings.github_clone_base_dir / full_name
 
-    if clone_dir.exists():
-        if force_pull:
-            await git_pull(clone_dir)
-        return clone_dir
+    # Use file lock to prevent race condition
+    with CloneLock(full_name):
+        # Re-check after acquiring lock (another process may have cloned)
+        if clone_dir.exists() and (clone_dir / ".git").exists():
+            if force_pull:
+                await git_pull(clone_dir)
+            return clone_dir
 
-    await shallow_clone(clone_url, clone_dir, branch)
+        # Clone to temp directory first, then rename atomically
+        temp_dir = clone_dir.parent / f".{clone_dir.name}.tmp"
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+
+        try:
+            await shallow_clone(clone_url, temp_dir, branch)
+            # Atomic rename (on same filesystem)
+            if clone_dir.exists():
+                shutil.rmtree(clone_dir)
+            temp_dir.rename(clone_dir)
+        except Exception:
+            # Cleanup temp on failure
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+            raise
+
     return clone_dir
 
 

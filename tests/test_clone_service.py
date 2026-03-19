@@ -157,17 +157,19 @@ async def test_ensure_local_clone_new():
         with patch("ora_automation_api.clone_service.settings") as mock_settings:
             mock_settings.github_clone_base_dir = Path(tmpdir)
 
-            mock_proc = AsyncMock()
-            mock_proc.returncode = 0
-            mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+            # Mock shallow_clone to create the temp directory (simulating git clone)
+            async def mock_shallow_clone(clone_url, target_path, branch="main"):
+                target_path.mkdir(parents=True, exist_ok=True)
+                (target_path / ".git").mkdir()
 
-            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            with patch("ora_automation_api.clone_service.shallow_clone", side_effect=mock_shallow_clone):
                 path = await ensure_local_clone(
                     "https://github.com/owner/repo.git",
                     "owner/repo",
                 )
 
             assert path == Path(tmpdir) / "owner" / "repo"
+            assert (path / ".git").exists()
 
 
 @pytest.mark.asyncio(loop_scope="function")
