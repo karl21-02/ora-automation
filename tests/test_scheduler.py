@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -168,7 +168,7 @@ def test_poll_executes_due_jobs(scheduler_db):
         env={},
         interval_minutes=60,
         enabled=True,
-        next_run_at=datetime.utcnow() - timedelta(minutes=5),
+        next_run_at=datetime.now(timezone.utc) - timedelta(minutes=5),
     )
     session.add(job)
     session.commit()
@@ -182,7 +182,11 @@ def test_poll_executes_due_jobs(scheduler_db):
     session.refresh(job)
     assert job.last_run_status is not None
     assert job.next_run_at is not None
-    assert job.next_run_at > datetime.utcnow()
+    # SQLite returns naive datetime, normalize for comparison
+    next_run = job.next_run_at
+    if next_run.tzinfo is None:
+        next_run = next_run.replace(tzinfo=timezone.utc)
+    assert next_run > datetime.now(timezone.utc)
 
 
 def test_poll_skips_disabled(scheduler_db):
@@ -199,7 +203,7 @@ def test_poll_skips_disabled(scheduler_db):
         env={},
         interval_minutes=60,
         enabled=False,
-        next_run_at=datetime.utcnow() - timedelta(minutes=5),
+        next_run_at=datetime.now(timezone.utc) - timedelta(minutes=5),
     )
     session.add(job)
     session.commit()
@@ -224,7 +228,7 @@ def test_interval_next_run():
 
     next_run = OraScheduler._calculate_next_run(job)
     assert next_run is not None
-    diff = (next_run - datetime.utcnow()).total_seconds()
+    diff = (next_run - datetime.now(timezone.utc)).total_seconds()
     assert 7100 < diff < 7300  # ~120 minutes
 
 
@@ -239,8 +243,9 @@ def test_cron_next_run():
 
     next_run = OraScheduler._calculate_next_run(job)
     assert next_run is not None
-    # CronTrigger may return tz-aware datetime; just verify it's in the future
-    now = datetime.utcnow()
-    # Make comparison work for both naive and aware datetimes
-    next_run_naive = next_run.replace(tzinfo=None) if next_run.tzinfo else next_run
-    assert next_run_naive > now
+    # CronTrigger may return tz-aware datetime; verify it's in the future
+    now = datetime.now(timezone.utc)
+    # Normalize both to aware datetimes for comparison
+    if next_run.tzinfo is None:
+        next_run = next_run.replace(tzinfo=timezone.utc)
+    assert next_run > now

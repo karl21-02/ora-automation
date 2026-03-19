@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -222,7 +222,7 @@ async def sync_installation(
             existing.language = repo_data.language
             existing.stars = repo_data.stars
             existing.is_private = repo_data.is_private
-            existing.synced_at = datetime.utcnow()
+            existing.synced_at = datetime.now(timezone.utc)
             updated += 1
         else:
             # Create new repo
@@ -243,7 +243,7 @@ async def sync_installation(
             db.add(repo)
             created += 1
 
-    installation.synced_at = datetime.utcnow()
+    installation.synced_at = datetime.now(timezone.utc)
     db.commit()
 
     return {

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/v1/scheduler", tags=["scheduler"])
 
 
 def _calculate_initial_next_run(job_data: ScheduledJobCreate | ScheduledJob) -> datetime | None:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     interval = getattr(job_data, "interval_minutes", None)
     cron = getattr(job_data, "cron_expression", None)
 
@@ -180,13 +180,13 @@ def trigger_job(job_id: str, db: Session = Depends(get_db)) -> OrchestrationRunR
         except Exception as exc:
             run.status = "error"
             run.error_message = f"queue enqueue failed: {exc}"
-            run.finished_at = datetime.utcnow()
+            run.finished_at = datetime.now(timezone.utc)
             db.add(run)
             db.commit()
             db.refresh(run)
             raise HTTPException(status_code=503, detail="Failed to enqueue run")
 
-    job.last_run_at = datetime.utcnow()
+    job.last_run_at = datetime.now(timezone.utc)
     job.last_run_status = "running"
     job.last_run_id = run.id
     db.add(job)

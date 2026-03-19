@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -644,7 +644,7 @@ def create_orchestration_run(
             run.fail_label = "STOP"
             run.exit_code = -1
             run.error_message = f"queue enqueue failed: {exc}"
-            run.finished_at = datetime.utcnow()
+            run.finished_at = datetime.now(timezone.utc)
             db.add(run)
             db.commit()
             db.refresh(run)
@@ -675,7 +675,7 @@ def create_batch_runs(
                 run.fail_label = "STOP"
                 run.exit_code = -1
                 run.error_message = f"queue enqueue failed: {exc}"
-                run.finished_at = datetime.utcnow()
+                run.finished_at = datetime.now(timezone.utc)
                 db.add(run)
                 db.commit()
                 db.refresh(run)
@@ -751,7 +751,7 @@ def create_orchestration_from_plan(
             run.fail_label = "STOP"
             run.exit_code = -1
             run.error_message = f"queue enqueue failed: {exc}"
-            run.finished_at = datetime.utcnow()
+            run.finished_at = datetime.now(timezone.utc)
             db.add(run)
             db.commit()
             db.refresh(run)

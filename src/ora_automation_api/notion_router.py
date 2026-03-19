@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -74,7 +74,7 @@ def _save_sync(
         existing.notion_url = notion_url
         existing.source_report_path = source_report_path
         existing.metadata_json = metadata_json or {}
-        existing.synced_at = datetime.utcnow()
+        existing.synced_at = datetime.now(timezone.utc)
         db.add(existing)
     else:
         existing = NotionSyncState(

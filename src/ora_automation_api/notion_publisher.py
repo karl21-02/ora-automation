@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from .notion_client import NotionClient
@@ -62,7 +62,7 @@ class NotionPublisher:
 
         properties: dict[str, Any] = {
             "Name": {"title": [{"text": {"content": f"R&D Report — {focus or version}"[:100]}}]},
-            "Report Date": {"date": {"start": data.get("generated_at", datetime.utcnow().isoformat())[:10]}},
+            "Report Date": {"date": {"start": data.get("generated_at", datetime.now(timezone.utc).isoformat())[:10]}},
             "Focus": {"rich_text": [{"text": {"content": (focus or "general")[:200]}}]},
             "Version": {"rich_text": [{"text": {"content": version[:100]}}]},
             "Topic Count": {"number": len(ranked)},

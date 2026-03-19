@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -48,7 +48,7 @@ class OraScheduler:
     def _poll_scheduled_jobs(self) -> None:
         db: Session = self._session_factory()
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             stmt = select(ScheduledJob).where(
                 ScheduledJob.enabled.is_(True),
                 ScheduledJob.next_run_at.isnot(None),
@@ -74,7 +74,7 @@ class OraScheduler:
         from .schemas import OrchestrationRunCreate
         from .service import create_run
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         payload = OrchestrationRunCreate(
             user_prompt=f"[Scheduled] {job.name}",
@@ -106,7 +106,7 @@ class OraScheduler:
 
     @staticmethod
     def _calculate_next_run(job: ScheduledJob) -> datetime | None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if job.interval_minutes and job.interval_minutes > 0:
             return now + timedelta(minutes=job.interval_minutes)
@@ -116,6 +116,9 @@ class OraScheduler:
                 from apscheduler.triggers.cron import CronTrigger
                 trigger = CronTrigger.from_crontab(job.cron_expression)
                 next_fire = trigger.get_next_fire_time(None, now)
+                # Ensure timezone-aware result
+                if next_fire and next_fire.tzinfo is None:
+                    next_fire = next_fire.replace(tzinfo=timezone.utc)
                 return next_fire
             except Exception as exc:
                 logger.warning("Invalid cron expression '%s' for job %s: %s", job.cron_expression, job.id, exc)

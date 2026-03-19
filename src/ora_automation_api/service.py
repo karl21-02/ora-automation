@@ -6,7 +6,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -257,7 +257,7 @@ def _run_pipeline(
             thread.join(timeout=10)
             return PipelineOutcome(cancelled=True)
 
-        run.heartbeat_at = datetime.utcnow()
+        run.heartbeat_at = datetime.now(timezone.utc)
         run.locked_by = worker_id
         db.add(run)
         db.commit()
@@ -380,7 +380,7 @@ def request_cancel(db: Session, run_id: str) -> OrchestrationRun | None:
     run.cancel_requested = True
     if run.status in {"queued", "retry", "paused"}:
         run.status = "cancelled"
-        run.finished_at = datetime.utcnow()
+        run.finished_at = datetime.now(timezone.utc)
         run.fail_label = "STOP"
     db.add(run)
     db.commit()
@@ -714,7 +714,7 @@ def execute_run(
         if run.cancel_requested:
             run.status = "cancelled"
             run.fail_label = "STOP"
-            run.finished_at = datetime.utcnow()
+            run.finished_at = datetime.now(timezone.utc)
             db.add(run)
             db.commit()
             return ExecutionOutcome(run_id=run.id, target=run.target, agent_role=agent_role, status="cancelled", fail_label="STOP", should_dlq=True, dlq_reason="cancelled")
@@ -723,11 +723,11 @@ def execute_run(
             return ExecutionOutcome(run_id=run.id, target=run.target, agent_role=agent_role, status=run.status, fail_label=run.fail_label or "STOP")
 
         run.status = "running"
-        run.started_at = run.started_at or datetime.utcnow()
+        run.started_at = run.started_at or datetime.now(timezone.utc)
         run.attempt_count = int(run.attempt_count or 0) + 1
         run.locked_by = worker_id
-        run.locked_at = datetime.utcnow()
-        run.heartbeat_at = datetime.utcnow()
+        run.locked_at = datetime.now(timezone.utc)
+        run.heartbeat_at = datetime.now(timezone.utc)
         run.current_stage = "execution"
         db.add(run)
         db.commit()
@@ -783,7 +783,7 @@ def execute_run(
         if outcome.cancelled:
             run.status = "cancelled"
             run.fail_label = "STOP"
-            run.finished_at = datetime.utcnow()
+            run.finished_at = datetime.now(timezone.utc)
             db.add(run)
             db.commit()
             _record_event(db, run.id, "execution", "cancelled", "run cancelled during execution", {})
@@ -804,7 +804,7 @@ def execute_run(
 
             if fail_label == "SKIP":
                 run.status = "skipped"
-                run.finished_at = datetime.utcnow()
+                run.finished_at = datetime.now(timezone.utc)
                 db.add(run)
                 db.commit()
                 return ExecutionOutcome(run_id=run.id, target=run.target, agent_role=agent_role, status="skipped", fail_label="SKIP")
@@ -812,8 +812,8 @@ def execute_run(
             if fail_label == "RETRY" and run.attempt_count < run.max_attempts:
                 delay = _retry_delay_seconds(run.attempt_count)
                 run.status = "retry"
-                run.next_retry_at = datetime.utcnow() + timedelta(seconds=delay)
-                run.finished_at = datetime.utcnow()
+                run.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+                run.finished_at = datetime.now(timezone.utc)
                 db.add(run)
                 db.commit()
                 _record_event(db, run.id, "execution", "retry_scheduled", "retry scheduled", {"retry_delay_seconds": delay})
@@ -825,7 +825,7 @@ def execute_run(
 
             run.status = "dlq"
             run.fail_label = "STOP"
-            run.finished_at = datetime.utcnow()
+            run.finished_at = datetime.now(timezone.utc)
             db.add(run)
             db.commit()
             _record_event(db, run.id, "execution", "moved_to_dlq", "run moved to dlq", {"attempt_count": run.attempt_count, "max_attempts": run.max_attempts})
@@ -840,7 +840,7 @@ def execute_run(
         run.fail_label = ""
         run.error_message = None
         run.exit_code = 0
-        run.finished_at = datetime.utcnow()
+        run.finished_at = datetime.now(timezone.utc)
         db.add(run)
         db.commit()
         _record_event(db, run.id, "execution", "stage_completed", "pipeline completed", {})
@@ -860,7 +860,7 @@ def execute_run(
             run.exit_code = -1
             run.fail_label = "STOP"
             run.error_message = str(exc)
-            run.finished_at = datetime.utcnow()
+            run.finished_at = datetime.now(timezone.utc)
             db.add(run)
             db.commit()
             _record_event(db, run.id, run.current_stage or "execution", "error", "unexpected error", {"error": str(exc)})
@@ -880,7 +880,7 @@ def recover_stale_runs(stale_after_seconds: float | None = None) -> list[Executi
     from .database import SessionLocal
 
     timeout = float(stale_after_seconds or settings.stale_timeout_seconds)
-    threshold = datetime.utcnow() - timedelta(seconds=max(5.0, timeout))
+    threshold = datetime.now(timezone.utc) - timedelta(seconds=max(5.0, timeout))
     db = SessionLocal()
     outcomes: list[ExecutionOutcome] = []
     try:
@@ -896,7 +896,7 @@ def recover_stale_runs(stale_after_seconds: float | None = None) -> list[Executi
             if int(run.attempt_count or 0) < int(run.max_attempts or 1):
                 delay = _retry_delay_seconds(int(run.attempt_count or 1))
                 run.status = "retry"
-                run.next_retry_at = datetime.utcnow() + timedelta(seconds=delay)
+                run.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
                 run.locked_by = None
                 run.locked_at = None
                 db.add(run)
@@ -911,7 +911,7 @@ def recover_stale_runs(stale_after_seconds: float | None = None) -> list[Executi
             else:
                 run.status = "dlq"
                 run.fail_label = "STOP"
-                run.finished_at = datetime.utcnow()
+                run.finished_at = datetime.now(timezone.utc)
                 db.add(run)
                 db.commit()
                 outcomes.append(
