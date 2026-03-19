@@ -40,6 +40,11 @@ dist/
 build/
 *.egg-info/
 
+# Tauri / Rust
+frontend/src-tauri/target/
+frontend/src-tauri/gen/
+frontend/src-tauri/Cargo.lock
+
 # Test / coverage
 .pytest_cache/
 htmlcov/
