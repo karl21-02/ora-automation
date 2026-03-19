@@ -272,7 +272,7 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
       })
       return
     }
-    const text = `다음 프로젝트 선택: ${selected.join(', ')}`
+    const text = `Selected projects: ${selected.join(', ')}`
     handleSend(text)
   }, [handleSend, onNewMessage])
 
@@ -365,7 +365,7 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
               color: '#1f2937',
               marginBottom: 8,
             }}>
-              {APP_NAME}에 오신 것을 환영합니다
+              Welcome to {APP_NAME}
             </h2>
             <p style={{
               fontSize: 14,
@@ -383,13 +383,13 @@ export default function ChatWindow({ messages, onNewMessage, onUpdateMessage, co
               maxWidth: 400,
             }}>
               <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>
-                예시로 시작해보세요:
+                Try an example:
               </p>
               {[
-                { icon: '🔬', text: 'Ora 프로젝트 R&D 분석 해줘' },
-                { icon: '🧪', text: 'OraAiServer E2E 테스트 실행해줘' },
-                { icon: '📊', text: '최근 보안 트렌드 분석해줘' },
-                { icon: '🤖', text: 'AI 에이전트 아키텍처 리서치해줘' },
+                { icon: '🔬', text: 'Run R&D analysis on my project' },
+                { icon: '🧪', text: 'Execute E2E tests for the API service' },
+                { icon: '📊', text: 'Research latest security trends' },
+                { icon: '🚀', text: 'Analyze microservices architecture patterns' },
               ].map(({ icon, text }) => (
                 <button
                   key={text}

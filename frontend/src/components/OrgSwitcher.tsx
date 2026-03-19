@@ -114,7 +114,7 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
       >
         <Building2 size={16} color="#6b7280" />
         <span style={{ flex: 1, textAlign: 'left', color: current ? '#374151' : '#9ca3af' }}>
-          {current?.name || '조직 미선택'}
+          {current?.name || 'No organization'}
         </span>
         {current?.is_preset && <span style={presetBadge}>Preset</span>}
         <ChevronDown
@@ -137,7 +137,7 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="조직 검색..."
+                placeholder="Search organizations..."
                 style={searchInputStyle}
                 onClick={(e) => e.stopPropagation()}
               />
@@ -158,7 +158,7 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
             <span style={{ width: 16, display: 'flex', justifyContent: 'center' }}>
               {currentOrgId === null && <Check size={14} color="#2563eb" />}
             </span>
-            <span style={{ color: '#6b7280' }}>📎 미분류 (기본 프리셋)</span>
+            <span style={{ color: '#6b7280' }}>📎 Unassigned (default preset)</span>
           </button>
 
           {filteredOrgs.length > 0 && <div style={dividerStyle} />}
@@ -193,14 +193,14 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
           {/* Empty state hint */}
           {orgs.length === 0 && onCreateNew && (
             <div style={emptyHintStyle}>
-              아직 조직이 없습니다. 나만의 AI 조직을 만들어보세요!
+              No organizations yet. Create your own!
             </div>
           )}
 
           {/* No search results */}
           {searchQuery && filteredOrgs.length === 0 && orgs.length > 0 && (
             <div style={emptyHintStyle}>
-              "{searchQuery}"에 해당하는 조직이 없습니다
+              No organizations matching "{searchQuery}"
             </div>
           )}
 
@@ -218,14 +218,14 @@ export default function OrgSwitcher({ currentOrgId, orgs, onSelect, onCreateNew 
                 }}
               >
                 <Plus size={14} />
-                <span>새 조직 만들기</span>
+                <span>Create new organization</span>
               </button>
             </>
           )}
 
           {/* Keyboard hint */}
           <div style={keyboardHintStyle}>
-            ↑↓ 이동 · Enter 선택 · Esc 닫기
+            ↑↓ Navigate · Enter Select · Esc Close
           </div>
         </div>
       )}

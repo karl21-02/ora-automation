@@ -19,10 +19,10 @@ interface Props {
 }
 
 const DIALOG_STATE_LABELS: Record<string, string> = {
-  understanding: '분석 중',
-  slot_filling: '정보 수집 중',
-  confirming: '확인 대기',
-  executing: '실행 중',
+  understanding: 'Analyzing',
+  slot_filling: 'Collecting info',
+  confirming: 'Awaiting confirmation',
+  executing: 'Executing',
 }
 
 const ALLOWED_TARGETS = [
@@ -156,7 +156,7 @@ export default function MessageBubble({ message, onExecute, onExecuteBatch, onDi
             color: '#92400e',
             fontWeight: 500,
           }}>
-            <div>실행 계획을 확인해주세요</div>
+            <div>Please confirm the execution plan</div>
             {(onConfirmDialog || onRejectDialog) && (
               <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                 {onConfirmDialog && (
@@ -173,7 +173,7 @@ export default function MessageBubble({ message, onExecute, onExecuteBatch, onDi
                       cursor: 'pointer',
                     }}
                   >
-                    확인
+                    Confirm
                   </button>
                 )}
                 {onRejectDialog && (
@@ -190,7 +190,7 @@ export default function MessageBubble({ message, onExecute, onExecuteBatch, onDi
                       cursor: 'pointer',
                     }}
                   >
-                    취소
+                    Cancel
                   </button>
                 )}
               </div>

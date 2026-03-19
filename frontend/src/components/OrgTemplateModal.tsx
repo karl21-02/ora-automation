@@ -23,14 +23,14 @@ export default function OrgTemplateModal({ onClose, onCreate, creating }: OrgTem
       <div style={modalStyle} onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div style={headerStyle}>
-          <span style={{ fontSize: 16, fontWeight: 600 }}>새 조직 만들기</span>
+          <span style={{ fontSize: 16, fontWeight: 600 }}>Create New Organization</span>
           <button onClick={onClose} style={closeBtnStyle}>&times;</button>
         </div>
 
         {/* Template Selection */}
         <div style={contentStyle}>
           <div style={{ marginBottom: 16 }}>
-            <label style={labelStyle}>템플릿 선택</label>
+            <label style={labelStyle}>Select Template</label>
             <div style={templateGridStyle}>
               {ORG_TEMPLATES.map(template => (
                 <TemplateCard
@@ -47,28 +47,28 @@ export default function OrgTemplateModal({ onClose, onCreate, creating }: OrgTem
           {selectedInfo && selectedInfo.id !== 'empty' && (
             <div style={previewStyle}>
               <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>
-                {selectedInfo.icon} {selectedInfo.name_ko} 미리보기
+                {selectedInfo.icon} {selectedInfo.name} Preview
               </div>
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                 <PreviewSection
-                  title="사일로"
+                  title="Silos"
                   items={selectedInfo.silos.map(s => ({ name: s.name, color: s.color }))}
                 />
                 <PreviewSection
-                  title="챕터"
+                  title="Chapters"
                   items={selectedInfo.chapters.map(c => ({ name: `${c.icon} ${c.name}`, color: c.color }))}
                 />
               </div>
               <div style={{ marginTop: 12, fontSize: 12, color: '#6b7280' }}>
-                {selectedInfo.agents.filter(a => a.is_clevel).length}명 C-Level + {' '}
-                {selectedInfo.agents.filter(a => !a.is_clevel).length}명 에이전트
+                {selectedInfo.agents.filter(a => a.is_clevel).length} C-Level + {' '}
+                {selectedInfo.agents.filter(a => !a.is_clevel).length} Agents
               </div>
             </div>
           )}
 
           {/* Organization Name Input */}
           <div style={{ marginTop: 16 }}>
-            <label style={labelStyle}>조직 이름</label>
+            <label style={labelStyle}>Organization Name</label>
             <input
               type="text"
               placeholder="My Company"
@@ -84,7 +84,7 @@ export default function OrgTemplateModal({ onClose, onCreate, creating }: OrgTem
         {/* Footer */}
         <div style={footerStyle}>
           <button onClick={onClose} style={cancelBtnStyle} disabled={creating}>
-            취소
+            Cancel
           </button>
           <button
             onClick={handleCreate}
@@ -95,7 +95,7 @@ export default function OrgTemplateModal({ onClose, onCreate, creating }: OrgTem
             }}
             disabled={!orgName.trim() || creating}
           >
-            {creating ? '생성 중...' : '생성'}
+            {creating ? 'Creating...' : 'Create'}
           </button>
         </div>
       </div>
@@ -123,14 +123,14 @@ function TemplateCard({
       }}
     >
       <div style={{ fontSize: 24, marginBottom: 8 }}>{template.icon}</div>
-      <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 4 }}>{template.name_ko}</div>
+      <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 4 }}>{template.name}</div>
       <div style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.3 }}>
         {template.id === 'empty' ? (
-          '직접 구성'
+          'Build from scratch'
         ) : (
           <>
-            {template.agents.length}명 에이전트<br />
-            {template.silos.length} 사일로, {template.chapters.length} 챕터
+            {template.agents.length} agents<br />
+            {template.silos.length} silos, {template.chapters.length} chapters
           </>
         )}
       </div>

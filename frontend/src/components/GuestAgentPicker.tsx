@@ -134,7 +134,7 @@ export default function GuestAgentPicker({ currentOrgId, selectedGuests, onSelec
         }}>
           {orgs.length === 0 ? (
             <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 20 }}>
-              다른 조직이 없습니다
+              No other organizations available
             </div>
           ) : (
             orgs.map((org) => {

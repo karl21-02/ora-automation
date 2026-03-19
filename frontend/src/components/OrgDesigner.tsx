@@ -451,8 +451,8 @@ export default function OrgDesigner({ org, onSelectAgent, onSelectChapter, onRef
         >
           <span style={{ fontSize: 14 }}>💡</span>
           <span>
-            이 조직에 <strong>{org.chapters.length}개의 Chapter</strong>가 있습니다.
-            <span style={{ color: '#2563eb', marginLeft: 4 }}>Advanced 모드에서 확인 →</span>
+            This organization has <strong>{org.chapters.length} Chapters</strong>.
+            <span style={{ color: '#2563eb', marginLeft: 4 }}>View in Advanced mode →</span>
           </span>
         </div>
       )}
