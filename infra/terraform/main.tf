@@ -186,8 +186,8 @@ ORA_PROJECTS_ROOT=/workspace
 ORCHESTRATION_PROFILE=standard
 ENVFILE
 
-    # Start services
-    docker compose -f docker-compose.yml up -d
+    # Start services (production)
+    docker compose -f docker-compose.prod.yml up -d --build
 
     echo "=== Mimir Backend Setup Complete ==="
     echo "API available at: http://$(curl -s ifconfig.me):8000"
