@@ -1,8 +1,18 @@
-# ora-automation
+# Ora Automation
 
-Multi-Agent R&D Research Orchestrator / 멀티 에이전트 R&D 리서치 오케스트레이터
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![React 19](https://img.shields.io/badge/react-19-61dafb.svg)](https://reactjs.org/)
 
-`ora-automation`은 Ora 프로젝트 워크스페이스를 스캔하고, 다중 에이전트 토론(스코어링, 디베이트, 컨센서스)을 수행하여 구조화된 리서치 리포트를 생성하는 자동화 플랫폼입니다. CLI, REST API, 또는 챗봇 UI를 통해 오케스트레이션을 실행할 수 있습니다.
+**Multi-Agent R&D Research Orchestrator**
+
+Ora Automation is a multi-agent orchestration platform that scans project workspaces, conducts multi-agent deliberation (scoring, debate, consensus), and generates structured research reports. Run orchestration via CLI, REST API, or chatbot UI.
+
+---
+
+**멀티 에이전트 R&D 리서치 오케스트레이터**
+
+`ora-automation`은 프로젝트 워크스페이스를 스캔하고, 다중 에이전트 토론(스코어링, 디베이트, 컨센서스)을 수행하여 구조화된 리서치 리포트를 생성하는 자동화 플랫폼입니다. CLI, REST API, 또는 챗봇 UI를 통해 오케스트레이션을 실행할 수 있습니다.
 
 ## Table of Contents / 목차
 
@@ -373,6 +383,14 @@ make qa-report-latest                # 최신 리포트 경로
 - [API Reference / API 레퍼런스](docs/API_REFERENCE.md) — 전체 엔드포인트 상세 문서 (요청/응답 스키마, 예시)
 - [GitHub Workflow / 깃허브 활용 규칙](docs/GITHUB_WORKFLOW.md) — 브랜치 전략, 커밋 컨벤션, PR/이슈/리뷰 규칙
 
+## Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## Security
+
+For security concerns, please see [SECURITY.md](SECURITY.md).
+
 ## License
 
-Private project.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
