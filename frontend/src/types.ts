@@ -281,3 +281,76 @@ export interface ProjectPrepareResponse {
   local_path: string
   cloned: boolean
 }
+
+// ── Scan Paths ──────────────────────────────────────────────────────
+
+export interface ScanPath {
+  id: string
+  path: string
+  name: string | null
+  enabled: boolean
+  recursive: boolean
+  last_scanned_at: string | null
+  project_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ScanPathCreate {
+  path: string
+  name?: string
+  recursive?: boolean
+}
+
+export interface ScanPathUpdate {
+  name?: string
+  enabled?: boolean
+  recursive?: boolean
+}
+
+export interface ScanPathList {
+  items: ScanPath[]
+  total: number
+}
+
+export interface ScanResult {
+  scan_path_id: string
+  projects_found: number
+  projects_created: number
+  projects_updated: number
+  duration_ms: number
+}
+
+// ── Project Details ──────────────────────────────────────────────────
+
+export interface ProjectEnvResponse {
+  has_env: boolean
+  has_env_example: boolean
+  env_content: Record<string, string>
+  env_example_content: Record<string, string> | null
+}
+
+export interface ConfigFile {
+  name: string
+  path: string
+  type: 'json' | 'toml' | 'yaml' | 'text'
+  content: Record<string, unknown> | unknown[] | string
+}
+
+export interface ProjectConfigResponse {
+  files: ConfigFile[]
+}
+
+export interface AnalysisHistoryItem {
+  id: string
+  run_type: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  user_prompt: string
+}
+
+export interface ProjectHistoryResponse {
+  items: AnalysisHistoryItem[]
+  total: number
+}

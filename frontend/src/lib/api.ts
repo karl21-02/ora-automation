@@ -1,4 +1,4 @@
-import type { ChatChoice, ChatPlan, ChatResponse, GithubInstallation, GithubRepo, LocalScanResult, OrgAgent, OrgChapter, OrgRecommendOption, OrgSilo, OrchestrationEvent, OrchestrationRun, Organization, OrganizationDetail, ProjectInfo, ProjectList, ProjectPrepareResponse, ReportListItem, ScheduledJob, ScheduledJobCreate, UnifiedProject } from '../types'
+import type { AnalysisHistoryItem, ChatChoice, ChatPlan, ChatResponse, ConfigFile, GithubInstallation, GithubRepo, LocalScanResult, OrgAgent, OrgChapter, OrgRecommendOption, OrgSilo, OrchestrationEvent, OrchestrationRun, Organization, OrganizationDetail, ProjectConfigResponse, ProjectEnvResponse, ProjectHistoryResponse, ProjectInfo, ProjectList, ProjectPrepareResponse, ReportListItem, ScanPath, ScanPathCreate, ScanPathList, ScanPathUpdate, ScanResult, ScheduledJob, ScheduledJobCreate, UnifiedProject } from '../types'
 
 const BASE = '/api/v1'
 
@@ -479,6 +479,61 @@ export async function scanLocalProjects(workspacePath?: string): Promise<LocalSc
 
 export async function prepareProject(projectId: string, forcePull = false): Promise<ProjectPrepareResponse> {
   return request<ProjectPrepareResponse>(`${BASE}/unified-projects/${projectId}/prepare?force_pull=${forcePull}`, {
+    method: 'POST',
+  })
+}
+
+export async function getProjectEnv(projectId: string): Promise<ProjectEnvResponse> {
+  return request<ProjectEnvResponse>(`${BASE}/unified-projects/${projectId}/env`)
+}
+
+export async function getProjectConfig(projectId: string): Promise<ProjectConfigResponse> {
+  return request<ProjectConfigResponse>(`${BASE}/unified-projects/${projectId}/config`)
+}
+
+export async function getProjectHistory(projectId: string, limit = 20, offset = 0): Promise<ProjectHistoryResponse> {
+  return request<ProjectHistoryResponse>(`${BASE}/unified-projects/${projectId}/history?limit=${limit}&offset=${offset}`)
+}
+
+// ── Scan Paths ──────────────────────────────────────────────────────
+
+export async function listScanPaths(enabled?: boolean): Promise<ScanPathList> {
+  const params = enabled !== undefined ? `?enabled=${enabled}` : ''
+  return request<ScanPathList>(`${BASE}/scan-paths${params}`)
+}
+
+export async function createScanPath(data: ScanPathCreate): Promise<ScanPath> {
+  return request<ScanPath>(`${BASE}/scan-paths`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getScanPath(scanPathId: string): Promise<ScanPath> {
+  return request<ScanPath>(`${BASE}/scan-paths/${scanPathId}`)
+}
+
+export async function updateScanPath(scanPathId: string, data: ScanPathUpdate): Promise<ScanPath> {
+  return request<ScanPath>(`${BASE}/scan-paths/${scanPathId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteScanPath(scanPathId: string): Promise<void> {
+  await fetch(`${BASE}/scan-paths/${scanPathId}`, { method: 'DELETE' })
+}
+
+export async function executeScanPath(scanPathId: string): Promise<ScanResult> {
+  return request<ScanResult>(`${BASE}/scan-paths/${scanPathId}/scan`, {
+    method: 'POST',
+  })
+}
+
+export async function executeScanAll(): Promise<ScanResult[]> {
+  return request<ScanResult[]>(`${BASE}/scan-paths/scan-all`, {
     method: 'POST',
   })
 }
