@@ -1,7 +1,10 @@
 """Environment file reader for project .env files."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Keys that should always be masked
 SENSITIVE_PATTERNS = {
@@ -86,7 +89,8 @@ def parse_env_file(path: Path, mask_sensitive: bool = True) -> dict[str, str]:
 
             content[key] = value
 
-    except Exception:
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning("Failed to read env file %s: %s", path, e)
         return {}
 
     return content
