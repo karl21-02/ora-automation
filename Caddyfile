@@ -6,5 +6,7 @@
 }
 
 api.mimisbrunn.com {
-    reverse_proxy api:8000
+    # API runs on host network for GCP metadata access
+    # Use Docker's host gateway (172.17.0.1) or localhost via host network
+    reverse_proxy 172.17.0.1:8000
 }

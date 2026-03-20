@@ -35,9 +35,14 @@ services:
     container_name: ora-automation-api
     working_dir: /workspace/Ora/ora-automation
     command: uvicorn ora_automation_api.main:app --host 0.0.0.0 --port 8000
+    # Use host network to access GCP metadata server for ADC (Workload Identity)
+    network_mode: host
+    extra_hosts:
+      - "db:127.0.0.1"
+      - "rabbitmq:127.0.0.1"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://mimir:mimir_secret_password@db:5432/mimir_db}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      DATABASE_URL: postgresql+psycopg://mimir:mimir_secret_password@127.0.0.1:5432/mimir_db
+      RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/
       RABBITMQ_EXCHANGE: ora.automation
       RABBITMQ_RETRY_EXCHANGE: ora.automation.retry
       RABBITMQ_DLX_EXCHANGE: ora.automation.dlx
@@ -47,15 +52,14 @@ services:
       ORA_AUTOMATION_RUN_OUTPUT: /workspace/Ora/ora-automation/research_reports/api_runs
       ORA_PROJECTS_ROOT: /workspace/Ora
       PYTHONUNBUFFERED: "1"
-      # Gemini
+      # Gemini via Workload Identity (ADC)
       ORA_RD_LLM_PROVIDER: gemini
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
-      GOOGLE_CLOUD_PROJECT_ID: ${GOOGLE_CLOUD_PROJECT_ID}
+      GOOGLE_CLOUD_PROJECT_ID: gdgoc-kangwon-cloud
       GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-asia-northeast3}
       ORA_RD_GEMINI_DISABLE_VERTEX: "0"
       GOOGLE_CLOUD_FALLBACK_LOCATIONS: ${GOOGLE_CLOUD_FALLBACK_LOCATIONS:-us-central1,us-east1,europe-west1}
-    ports:
-      - "8000:8000"
+      # ADC will automatically use VM's metadata server
     depends_on:
       db:
         condition: service_healthy
