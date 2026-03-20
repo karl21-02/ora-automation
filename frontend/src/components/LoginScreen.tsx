@@ -1,9 +1,20 @@
-import { open } from '@tauri-apps/plugin-shell'
 import { useState } from 'react'
 import { googleAuth, type AuthUser } from '../lib/api'
 
 // Google OAuth Client ID for desktop app
 const GOOGLE_CLIENT_ID = '379646863345-ik2tkrja7qn19eqj1uia56711vl6nn58.apps.googleusercontent.com'
+
+// Dynamic import for Tauri shell plugin (only available in Tauri app)
+async function openInBrowser(url: string): Promise<void> {
+  try {
+    // Try Tauri shell plugin first (desktop app)
+    const { open } = await import('@tauri-apps/plugin-shell')
+    await open(url)
+  } catch {
+    // Fallback to window.open for web (won't work for OOB flow, but handles gracefully)
+    window.open(url, '_blank')
+  }
+}
 
 interface LoginScreenProps {
   onLogin: (user: AuthUser) => void
@@ -22,7 +33,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&access_type=offline`
 
     try {
-      await open(authUrl)
+      await openInBrowser(authUrl)
       setShowCodeInput(true)
       setError(null)
     } catch (err) {
