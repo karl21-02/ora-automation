@@ -1,0 +1,10 @@
+# Caddyfile for Mimir API
+# Automatic HTTPS via Let's Encrypt
+
+{
+    email admin@wollenlabs.com
+}
+
+api.mimir.wollenlabs.com {
+    reverse_proxy api:8000
+}
