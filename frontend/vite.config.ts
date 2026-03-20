@@ -12,4 +12,10 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      // Externalize Tauri plugins - they're only available in desktop app
+      external: ['@tauri-apps/plugin-shell'],
+    },
+  },
 })
