@@ -59,6 +59,10 @@ services:
       GOOGLE_CLOUD_FALLBACK_LOCATIONS: us-east1,us-west1,europe-west4
       # Service account key for Vertex AI authentication
       GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcp-sa-key.json
+      # Google OAuth for user authentication
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:-mimir-prod-jwt-secret-change-me}
     ports:
       - "8000:8000"
     depends_on:

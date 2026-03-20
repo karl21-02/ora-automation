@@ -88,6 +88,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from .auth_router import router as auth_router
 from .github_router import router as github_router
 from .notion_router import router as notion_router
 from .org_router import router as org_router
@@ -95,6 +96,7 @@ from .projects_router import router as projects_router
 from .scan_paths_router import router as scan_paths_router
 from .scheduler_router import router as scheduler_router
 
+app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(github_router)
 app.include_router(notion_router)
@@ -242,6 +244,19 @@ def _run_ddl_migrations() -> None:
         "ALTER TABLE projects ADD COLUMN IF NOT EXISTS scan_path_id VARCHAR(36) REFERENCES scan_paths(id) ON DELETE SET NULL",
         # Add project_id to orchestration_runs for history tracking
         "ALTER TABLE orchestration_runs ADD COLUMN IF NOT EXISTS project_id VARCHAR(36) REFERENCES projects(id) ON DELETE SET NULL",
+        # Users table for Google OAuth authentication
+        """CREATE TABLE IF NOT EXISTS users (
+            id VARCHAR(36) PRIMARY KEY,
+            email VARCHAR(255) NOT NULL UNIQUE,
+            name VARCHAR(255) NOT NULL,
+            picture VARCHAR(500),
+            google_id VARCHAR(255) NOT NULL UNIQUE,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_login_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)",
+        "CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)",
     ]
     with engine.begin() as conn:
         for stmt in statements:

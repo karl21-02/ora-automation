@@ -6,13 +6,82 @@ const API_HOST = import.meta.env.PROD
   : ''
 const BASE = `${API_HOST}/api/v1`
 
+// Auth token storage
+const TOKEN_KEY = 'mimir-auth-token'
+
+export function getAuthToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+export function setAuthToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token)
+}
+
+export function clearAuthToken(): void {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+function getAuthHeaders(): Record<string, string> {
+  const token = getAuthToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init)
+  const headers = {
+    ...getAuthHeaders(),
+    ...(init?.headers || {}),
+  }
+  const res = await fetch(url, { ...init, headers })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`${res.status} ${res.statusText}: ${body}`)
   }
   return res.json() as Promise<T>
+}
+
+// ── Auth ──────────────────────────────────────────────────────
+
+export interface AuthUser {
+  id: string
+  email: string
+  name: string
+  picture: string | null
+}
+
+export interface AuthResponse {
+  access_token: string
+  token_type: string
+  expires_in: number
+  user: AuthUser
+}
+
+export async function googleAuth(code: string, redirectUri: string = 'urn:ietf:wg:oauth:2.0:oob'): Promise<AuthResponse> {
+  const res = await fetch(`${BASE}/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, redirect_uri: redirectUri }),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`${res.status} ${res.statusText}: ${body}`)
+  }
+  const data = await res.json() as AuthResponse
+  setAuthToken(data.access_token)
+  return data
+}
+
+export async function getMe(): Promise<AuthUser> {
+  return request<AuthUser>(`${BASE}/auth/me`)
+}
+
+export async function refreshAuthToken(): Promise<AuthResponse> {
+  const data = await request<AuthResponse>(`${BASE}/auth/refresh`, { method: 'POST' })
+  setAuthToken(data.access_token)
+  return data
+}
+
+export function logout(): void {
+  clearAuthToken()
 }
 
 export interface ChatHistoryMessage {

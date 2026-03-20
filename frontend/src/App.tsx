@@ -2,13 +2,14 @@ import { Menu } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ChatWindow from './components/ChatWindow'
 import ControlCenter from './components/ControlCenter'
+import LoginScreen from './components/LoginScreen'
 import NewChatModal from './components/NewChatModal'
 import OrgPanel from './components/OrgPanel'
 import ReportViewer from './components/ReportViewer'
 import SchedulerPanel from './components/SchedulerPanel'
 import SettingsPanel from './components/SettingsPanel'
 import Sidebar from './components/Sidebar'
-import { createConversation, deleteConversation, getConversation, listConversations, listOrgs, renameConversation, updateConversationOrg } from './lib/api'
+import { createConversation, deleteConversation, getAuthToken, getConversation, getMe, listConversations, listOrgs, logout, renameConversation, updateConversationOrg, type AuthUser } from './lib/api'
 import { useKeyboardShortcuts } from './lib/hooks/useKeyboardShortcuts'
 import { useIsMobile } from './lib/hooks/useMediaQuery'
 import { useRunningCount } from './lib/hooks/useRunningCount'
@@ -32,6 +33,8 @@ function newConversation(orgId?: string | null, selectedProjects?: string[]): Co
 }
 
 export default function App() {
+  const [user, setUser] = useState<AuthUser | null>(null)
+  const [authChecked, setAuthChecked] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeId, setActiveId] = useState<string>('')
   const [reportFile, setReportFile] = useState<string | null>(null)
@@ -45,6 +48,22 @@ export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [newChatModalOpen, setNewChatModalOpen] = useState(false)
   const { width: sidebarWidth, handleMouseDown: handleResizeStart } = useSidebarResize()
+
+  // Check auth on mount
+  useEffect(() => {
+    const token = getAuthToken()
+    if (token) {
+      getMe()
+        .then(setUser)
+        .catch(() => {
+          logout()
+          setUser(null)
+        })
+        .finally(() => setAuthChecked(true))
+    } else {
+      setAuthChecked(true)
+    }
+  }, [])
 
   // Close mobile sidebar when switching away from mobile view
   useEffect(() => {
@@ -259,6 +278,28 @@ export default function App() {
   const handleMobileClose = useCallback(() => {
     if (isMobile) setMobileOpen(false)
   }, [isMobile])
+
+  // Show loading while checking auth
+  if (!authChecked) {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100vh',
+        color: '#9ca3af',
+        fontSize: 15,
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      }}>
+        Loading...
+      </div>
+    )
+  }
+
+  // Show login screen if not authenticated
+  if (!user) {
+    return <LoginScreen onLogin={setUser} />
+  }
 
   if (!dbReady || !activeConv) {
     return (

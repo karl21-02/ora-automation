@@ -154,6 +154,13 @@ class Settings:
             os.getenv("GITHUB_CLONE_BASE_DIR", "/tmp/ora-clones")
         ).resolve()
 
+        # Google OAuth
+        self.google_client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+        self.google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
+        self.jwt_secret = os.getenv("JWT_SECRET", "mimir-dev-secret-change-in-production").strip()
+        self.jwt_algorithm = "HS256"
+        self.jwt_expire_days = int(os.getenv("JWT_EXPIRE_DAYS", "30").strip())
+
         self._validate()
 
     def _validate(self) -> None:
