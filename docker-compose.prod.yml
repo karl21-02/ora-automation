@@ -52,7 +52,7 @@ services:
       PYTHONUNBUFFERED: "1"
       # Gemini via Service Account Key
       ORA_RD_LLM_PROVIDER: gemini
-      GEMINI_MODEL: gemini-2.0-flash
+      GEMINI_MODEL: gemini-2.5-flash
       GOOGLE_CLOUD_PROJECT_ID: gdgoc-kangwon-cloud
       GOOGLE_CLOUD_LOCATION: us-central1
       ORA_RD_GEMINI_DISABLE_VERTEX: "0"
