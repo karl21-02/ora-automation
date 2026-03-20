@@ -52,11 +52,11 @@ services:
       PYTHONUNBUFFERED: "1"
       # Gemini via Service Account Key
       ORA_RD_LLM_PROVIDER: gemini
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      GEMINI_MODEL: gemini-2.0-flash
       GOOGLE_CLOUD_PROJECT_ID: gdgoc-kangwon-cloud
-      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-asia-northeast3}
+      GOOGLE_CLOUD_LOCATION: us-central1
       ORA_RD_GEMINI_DISABLE_VERTEX: "0"
-      GOOGLE_CLOUD_FALLBACK_LOCATIONS: ${GOOGLE_CLOUD_FALLBACK_LOCATIONS:-us-central1,us-east1,europe-west1}
+      GOOGLE_CLOUD_FALLBACK_LOCATIONS: us-east1,us-west1,europe-west4
       # Service account key for Vertex AI authentication
       GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcp-sa-key.json
     ports:
