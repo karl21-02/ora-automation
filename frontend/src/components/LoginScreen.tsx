@@ -4,16 +4,26 @@ import { googleAuth, type AuthUser } from '../lib/api'
 // Google OAuth Client ID for desktop app
 const GOOGLE_CLIENT_ID = '379646863345-ik2tkrja7qn19eqj1uia56711vl6nn58.apps.googleusercontent.com'
 
-// Dynamic import for Tauri shell plugin (only available in Tauri app)
+// Open URL in browser using Tauri shell plugin
 async function openInBrowser(url: string): Promise<void> {
-  try {
-    // Try Tauri shell plugin first (desktop app)
-    // @ts-expect-error - Tauri plugin only available in desktop app
-    const shellModule = await import('@tauri-apps/plugin-shell')
-    await shellModule.open(url)
-  } catch {
-    // Fallback to window.open for web (won't work for OOB flow, but handles gracefully)
-    window.open(url, '_blank')
+  // Check if we're in Tauri environment
+  if (window.__TAURI_INTERNALS__) {
+    try {
+      const { open } = await import('@tauri-apps/plugin-shell')
+      await open(url)
+      return
+    } catch (err) {
+      console.error('Tauri shell.open failed:', err)
+    }
+  }
+  // Fallback to window.open
+  window.open(url, '_blank')
+}
+
+// Extend Window interface for Tauri
+declare global {
+  interface Window {
+    __TAURI_INTERNALS__?: unknown
   }
 }
 

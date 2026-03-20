@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Check if building for Tauri (tauri CLI sets this)
+const isTauri = process.env.TAURI_ENV_PLATFORM !== undefined
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -14,8 +17,8 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      // Externalize Tauri plugins - they're only available in desktop app
-      external: ['@tauri-apps/plugin-shell'],
+      // Only externalize Tauri plugins when NOT building for Tauri (e.g., Docker build)
+      external: isTauri ? [] : ['@tauri-apps/plugin-shell'],
     },
   },
 })
