@@ -35,14 +35,12 @@ services:
     container_name: ora-automation-api
     working_dir: /workspace/Ora/ora-automation
     command: uvicorn ora_automation_api.main:app --host 0.0.0.0 --port 8000
-    # Use host network to access GCP metadata server for ADC (Workload Identity)
-    network_mode: host
+    # Add GCP metadata server route for ADC (Workload Identity)
     extra_hosts:
-      - "db:127.0.0.1"
-      - "rabbitmq:127.0.0.1"
+      - "metadata.google.internal:169.254.169.254"
     environment:
-      DATABASE_URL: postgresql+psycopg://mimir:mimir_secret_password@127.0.0.1:5432/mimir_db
-      RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://mimir:mimir_secret_password@db:5432/mimir_db}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
       RABBITMQ_EXCHANGE: ora.automation
       RABBITMQ_RETRY_EXCHANGE: ora.automation.retry
       RABBITMQ_DLX_EXCHANGE: ora.automation.dlx
@@ -59,7 +57,10 @@ services:
       GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-asia-northeast3}
       ORA_RD_GEMINI_DISABLE_VERTEX: "0"
       GOOGLE_CLOUD_FALLBACK_LOCATIONS: ${GOOGLE_CLOUD_FALLBACK_LOCATIONS:-us-central1,us-east1,europe-west1}
-      # ADC will automatically use VM's metadata server
+      # GCE_METADATA_HOST enables ADC to find metadata server from Docker container
+      GCE_METADATA_HOST: metadata.google.internal
+    ports:
+      - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
