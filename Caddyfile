@@ -2,9 +2,9 @@
 # Automatic HTTPS via Let's Encrypt
 
 {
-    email admin@wollenlabs.com
+    email manuna530@gmail.com
 }
 
-api.mimir.wollenlabs.com {
+api.mimisbrunn.com {
     reverse_proxy api:8000
 }
