@@ -8,8 +8,9 @@ const GOOGLE_CLIENT_ID = '379646863345-ik2tkrja7qn19eqj1uia56711vl6nn58.apps.goo
 async function openInBrowser(url: string): Promise<void> {
   try {
     // Try Tauri shell plugin first (desktop app)
-    const { open } = await import('@tauri-apps/plugin-shell')
-    await open(url)
+    // @ts-expect-error - Tauri plugin only available in desktop app
+    const shellModule = await import('@tauri-apps/plugin-shell')
+    await shellModule.open(url)
   } catch {
     // Fallback to window.open for web (won't work for OOB flow, but handles gracefully)
     window.open(url, '_blank')
