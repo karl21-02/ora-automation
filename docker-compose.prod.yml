@@ -35,9 +35,9 @@ services:
     container_name: ora-automation-api
     working_dir: /workspace/Ora/ora-automation
     command: uvicorn ora_automation_api.main:app --host 0.0.0.0 --port 8000
-    # Add GCP metadata server route for ADC (Workload Identity)
-    extra_hosts:
-      - "metadata.google.internal:169.254.169.254"
+    volumes:
+      # Mount GCP service account key (created manually on VM, not in git)
+      - /opt/mimir/secrets/gcp-sa-key.json:/secrets/gcp-sa-key.json:ro
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://mimir:mimir_secret_password@db:5432/mimir_db}
       RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
@@ -50,15 +50,15 @@ services:
       ORA_AUTOMATION_RUN_OUTPUT: /workspace/Ora/ora-automation/research_reports/api_runs
       ORA_PROJECTS_ROOT: /workspace/Ora
       PYTHONUNBUFFERED: "1"
-      # Gemini via Workload Identity (ADC)
+      # Gemini via Service Account Key
       ORA_RD_LLM_PROVIDER: gemini
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
       GOOGLE_CLOUD_PROJECT_ID: gdgoc-kangwon-cloud
       GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-asia-northeast3}
       ORA_RD_GEMINI_DISABLE_VERTEX: "0"
       GOOGLE_CLOUD_FALLBACK_LOCATIONS: ${GOOGLE_CLOUD_FALLBACK_LOCATIONS:-us-central1,us-east1,europe-west1}
-      # GCE_METADATA_HOST enables ADC to find metadata server from Docker container
-      GCE_METADATA_HOST: metadata.google.internal
+      # Service account key for Vertex AI authentication
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcp-sa-key.json
     ports:
       - "8000:8000"
     depends_on:
