@@ -15,6 +15,7 @@ struct GitRepo {
 /// Scan a directory for git repositories (folders containing .git)
 #[tauri::command]
 fn scan_git_repos(folder_path: String, max_depth: Option<usize>) -> Result<Vec<GitRepo>, String> {
+    // 경로 유효성 검사
     let path = Path::new(&folder_path);
     if !path.exists() {
         return Err("Folder does not exist".to_string());
