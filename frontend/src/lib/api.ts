@@ -2,7 +2,7 @@ import type { ChatChoice, ChatPlan, ChatResponse, GithubInstallation, GithubRepo
 
 // Use GCP server in production, localhost in development
 const API_HOST = import.meta.env.PROD
-  ? 'http://34.22.70.164:8000'
+  ? 'https://api.mimir.wollenlabs.com'
   : ''
 const BASE = `${API_HOST}/api/v1`
 
